@@ -1,731 +1,1144 @@
-import { isFirebaseConfigured } from "./config.js";
-import { createDeckForPlayers, shuffle } from "./tiles.js";
-import { evaluateHand, getDoraMultiplier } from "./judge.js";
-import {
-  initFirebase, createRoom, joinRoom, checkRoomMembership,
-  subscribeRoom, updateRoom, runRoomTransaction
-} from "./firebase-sync.js";
-
-const LS_ROOM = "nyanjara_room_code";
-const LS_NAME = "nyanjara_player_name";
-
-let myUid = null;
-let currentRoomCode = null;
-let currentRoom = null;
-let unsubRoom = null;
-
-// ローカル手牌並び順・UI状態
-let localHandUids = [];
-let selectedUid = null;
-let interactionMode = "normal"; // normal | copyTarget | exchangeRiver | finalSwapRiver
-
-const $ = (id) => document.getElementById(id);
-
-function showScreen(name) {
-  for (const s of ["lobby", "waiting", "game", "vote", "result"]) {
-    $(`screen-${s}`).classList.toggle("hidden", s !== name);
-  }
-  const inRoom = name !== "lobby";
-  $("header-room-badge").classList.toggle("hidden", !inRoom);
-  $("btn-leave-room").classList.toggle("hidden", !inRoom);
-  if (inRoom) $("header-room-badge").textContent = `部屋: ${currentRoomCode}`;
-}
-
-function getOrderedHand(serverHand) {
-  const map = new Map(serverHand.map(t => [t.uid, t]));
-  localHandUids = localHandUids.filter(uid => map.has(uid));
-  for (const t of serverHand) {
-    if (!localHandUids.includes(t.uid)) localHandUids.push(t.uid);
-  }
-  return localHandUids.map(uid => map.get(uid));
-}
-
-function drawTileWithReshuffle(state) {
-  if (state.deck.length === 0) {
-    const pool = [...state.discard, ...state.excluded];
-    if (pool.length === 0) return null;
-    state.deck = shuffle(pool);
-    state.discard = [];
-    state.excluded = [];
-  }
-  return state.deck.shift();
-}
-
-function drawNonDoraTile(state, uid) {
-  for (let guard = 0; guard < 30; guard++) {
-    const tile = drawTileWithReshuffle(state);
-    if (!tile) return null;
-    if (tile.kind === "dora") {
-      state.doras[uid].push(tile);
-    } else {
-      return tile;
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🐱 にゃんジャラ オンライン</title>
+  <style>
+    :root {
+      --bg: #fff8f0;
+      --card: #ffffff;
+      --primary: #ff7b54;
+      --primary-dark: #e66038;
+      --accent: #4ecdc4;
+      --text: #3d312a;
+      --muted: #7a6b63;
+      --border: #ecd9c6;
+      --cat-bg: #fff3e6;
+      --item-bg: #eefaf9;
+      --special-bg: #fff9db;
     }
-  }
-  return null;
-}
-
-function buildRoundInitialState(playersObj, turnOrder, roundNum) {
-  const deck = createDeckForPlayers(turnOrder.length);
-  const state = {
-    deck,
-    discard: [],
-    excluded: [],
-    hands: {},
-    doras: {},
-    drawCounts: {},
-    statuses: {},
-    winResults: {},
-    finalSwapUsed: {}
-  };
-
-  for (const uid of turnOrder) {
-    state.hands[uid] = [];
-    state.doras[uid] = [];
-    state.drawCounts[uid] = 0;
-    state.statuses[uid] = "playing";
-    state.winResults[uid] = null;
-    state.finalSwapUsed[uid] = false;
-  }
-
-  for (let i = 0; i < 11; i++) {
-    for (const uid of turnOrder) {
-      const tile = drawNonDoraTile(state, uid);
-      if (tile) state.hands[uid].push(tile);
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: 40px;
     }
-  }
-
-  return {
-    phase: "playing",
-    round: roundNum,
-    turnIndex: 0,
-    turnPhase: "draw",
-    ...state,
-    names: {},
-    votes: {},
-    roundResults: null
-  };
-}
-
-function advanceTurn(room) {
-  const n = room.turnOrder.length;
-  for (let step = 1; step <= n; step++) {
-    const idx = (room.turnIndex + step) % n;
-    const uid = room.turnOrder[idx];
-    if (room.statuses[uid] === "playing") {
-      return { nextIndex: idx, allDone: false };
+    .hidden { display: none !important; }
+    .app-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card);
+      border-bottom: 2px solid var(--border);
+      padding: 10px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 20;
     }
-  }
-  return { nextIndex: 0, allDone: true };
-}
-
-function createTileEl(tile, { mini = false, selected = false, targetable = false } = {}) {
-  const div = document.createElement("div");
-  const typeClass = tile.kind === "cat" ? "cat" : tile.kind === "item" ? "item" : "special";
-  div.className = `tile ${typeClass}${mini ? " mini" : ""}${selected ? " selected" : ""}${targetable ? " selectable-target" : ""}`;
-
-  let emoji = "", tag = "", expr = "";
-  if (tile.kind === "cat") {
-    emoji = tile.catEmoji;
-    tag = tile.catName;
-    expr = `${tile.exprEmoji}${tile.exprName}`;
-  } else if (tile.kind === "item") {
-    emoji = tile.itemEmoji;
-    tag = tile.itemName;
-  } else {
-    emoji = tile.specialEmoji;
-    tag = tile.specialName;
-    expr = tile.specialSub;
-  }
-
-  div.innerHTML = `
-    ${tile.isCopied ? '<span class="tile-badge-copy">コピー</span>' : ""}
-    <div class="tile-emoji">${emoji}</div>
-    <div class="tile-tag">${tag}</div>
-    ${expr ? `<div class="tile-expr">${expr}</div>` : ""}
-  `;
-  return div;
-}
-
-function renderWaiting(room) {
-  showScreen("waiting");
-  $("waiting-room-code").textContent = room.code;
-  const list = $("waiting-player-list");
-  list.innerHTML = "";
-  const players = room.turnOrder.map(uid => room.players[uid]);
-  $("waiting-player-count").textContent = players.length;
-
-  for (const p of players) {
-    const li = document.createElement("li");
-    li.innerHTML = `<span>${p.name}</span><span>${p.uid === room.hostUid ? "👑 ホスト" : "参加者"}</span>`;
-    list.appendChild(li);
-  }
-
-  const isHost = room.hostUid === myUid;
-  $("host-start-area").classList.toggle("hidden", !isHost);
-  $("waiting-guest-msg").classList.toggle("hidden", isHost);
-  $("btn-start-game").disabled = players.length < 2;
-}
-
-function renderGame(room) {
-  showScreen("game");
-  $("game-round").textContent = room.round;
-  $("game-deck-count").textContent = room.deck.length;
-
-  const activeUid = room.turnOrder[room.turnIndex];
-  const isMyTurn = activeUid === myUid && room.statuses[myUid] === "playing";
-  const activeName = room.players[activeUid]?.name || "---";
-  const banner = $("game-turn-banner");
-  banner.textContent = isMyTurn ? "⭐ あなたの番です！" : `${activeName} さんの番`;
-  banner.classList.toggle("is-mine", isMyTurn);
-
-  // 他プレイヤーバー
-  const pBar = $("game-players-bar");
-  pBar.innerHTML = "";
-  for (const uid of room.turnOrder) {
-    const p = room.players[uid];
-    const st = room.statuses[uid];
-    const doraCount = (room.doras[uid] || []).length;
-    const chip = document.createElement("div");
-    chip.className = `p-chip${uid === activeUid && st === "playing" ? " active" : ""}${st !== "playing" ? " done" : ""}`;
-    const stLabel = st === "won" ? "🎉 上がり待機" : st === "finished" ? "⏳ 終了待機" : `巡目 ${room.drawCounts[uid]}/20`;
-    chip.innerHTML = `
-      <div><strong>${p.name}</strong>${uid === myUid ? " (自分)" : ""}</div>
-      <div>${p.totalScore}点 / ドラ${doraCount}枚</div>
-      <div>${stLabel}</div>
-    `;
-    pBar.appendChild(chip);
-  }
-
-  // 捨て牌（川）
-  const riverEl = $("river-tiles");
-  riverEl.innerHTML = "";
-  const riverClickable = isMyTurn && room.turnPhase === "action" &&
-    (interactionMode === "exchangeRiver" || interactionMode === "finalSwapRiver");
-  $("river-hint").textContent = riverClickable ? "（交換したい牌をタップ！）" : "";
-
-  room.discard.forEach((tile, idx) => {
-    const el = createTileEl(tile, { mini: true, targetable: riverClickable });
-    if (riverClickable) {
-      el.onclick = () => handleRiverClick(idx);
+    .brand { font-weight: bold; font-size: 1.15rem; }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+    main { max-width: 960px; margin: 16px auto; padding: 0 12px; }
+    .card {
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(61,49,42,0.06);
     }
-    riverEl.appendChild(el);
-  });
-
-  // 自分の状態
-  const myHand = getOrderedHand(room.hands[myUid] || []);
-  const myDoras = room.doras[myUid] || [];
-  const myDraws = room.drawCounts[myUid] || 0;
-  $("my-draw-count").textContent = myDraws;
-  $("my-dora-count").textContent = myDoras.length;
-  $("my-dora-mult").textContent = `×${getDoraMultiplier(myDoras.length)}`;
-  $("my-hand-count").textContent = myHand.length;
-
-  const doraListEl = $("my-dora-list");
-  doraListEl.innerHTML = "";
-  myDoras.forEach(d => doraListEl.appendChild(createTileEl(d, { mini: true })));
-
-  // 手牌描画
-  const handEl = $("my-hand-tiles");
-  handEl.innerHTML = "";
-  myHand.forEach((tile) => {
-    const isSel = tile.uid === selectedUid;
-    const isCopyTarget = interactionMode === "copyTarget" && !isSel && tile.kind !== "special" && tile.kind !== "dora";
-    const el = createTileEl(tile, { selected: isSel, targetable: isCopyTarget });
-    el.onclick = () => handleHandTileClick(tile, room);
-    handEl.appendChild(el);
-  });
-
-  renderActionControls(room, myHand, isMyTurn, myDraws);
-}
-
-function renderActionControls(room, myHand, isMyTurn, myDraws) {
-  const guide = $("action-guide");
-  const btns = $("action-buttons");
-  btns.innerHTML = "";
-
-  if (room.statuses[myUid] !== "playing") {
-    guide.textContent = "あなたは待機中です。他のプレイヤーが終わるまでお待ちください。";
-    return;
-  }
-  if (!isMyTurn) {
-    guide.textContent = "他のプレイヤーの番です（手牌のタップで並び替えができます）。";
-    return;
-  }
-
-  if (room.turnPhase === "draw") {
-    guide.textContent = "山札から1枚引いてください。";
-    const btnDraw = document.createElement("button");
-    btnDraw.className = "btn btn-primary";
-    btnDraw.textContent = "🎴 山札から1枚引く";
-    btnDraw.onclick = handleDrawTile;
-    btns.appendChild(btnDraw);
-    return;
-  }
-
-  // turnPhase === 'action'
-  if (interactionMode === "copyTarget") {
-    guide.textContent = "📋 コピーしたい自分の手牌を1枚タップしてください！";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.className = "btn btn-sub";
-    cancelBtn.textContent = "キャンセル";
-    cancelBtn.onclick = () => { interactionMode = "normal"; renderGame(currentRoom); };
-    btns.appendChild(cancelBtn);
-    return;
-  }
-  if (interactionMode === "exchangeRiver" || interactionMode === "finalSwapRiver") {
-    guide.textContent = "🔄 川（捨て牌）から手に入れたい牌を1枚タップしてください！";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.className = "btn btn-sub";
-    cancelBtn.textContent = "キャンセル";
-    cancelBtn.onclick = () => { interactionMode = "normal"; renderGame(currentRoom); };
-    btns.appendChild(cancelBtn);
-    return;
-  }
-
-  const evalResult = evaluateHand(myHand);
-  const selectedTile = myHand.find(t => t.uid === selectedUid);
-  const isFinalTurn = myDraws >= 20;
-
-  guide.textContent = isFinalTurn
-    ? "【20巡目】上がるか、特別ルールで川の牌と交換、または終了してください。"
-    : "牌を選んで捨てるか、特別牌・上がりを使用してください。";
-
-  if (evalResult) {
-    const winBtn = document.createElement("button");
-    winBtn.className = "btn btn-win";
-    winBtn.textContent = `🎉 上がり宣言！（${evalResult.label}：${evalResult.score}点）`;
-    winBtn.onclick = () => handleWin(evalResult);
-    btns.appendChild(winBtn);
-  }
-
-  if (selectedTile?.specialId === "copy") {
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "btn btn-accent";
-    copyBtn.textContent = "📋 コピー牌を使う";
-    copyBtn.onclick = () => { interactionMode = "copyTarget"; renderGame(currentRoom); };
-    btns.appendChild(copyBtn);
-  }
-
-  if (selectedTile?.specialId === "exchange" && room.discard.length > 0) {
-    const exBtn = document.createElement("button");
-    exBtn.className = "btn btn-accent";
-    exBtn.textContent = "🔄 交換牌を使う";
-    exBtn.onclick = () => { interactionMode = "exchangeRiver"; renderGame(currentRoom); };
-    btns.appendChild(exBtn);
-  }
-
-  if (!isFinalTurn) {
-    const disBtn = document.createElement("button");
-    disBtn.className = "btn btn-primary";
-    disBtn.disabled = !selectedTile;
-    disBtn.textContent = selectedTile ? "選択した牌を捨てる" : "捨てる牌を選択してください";
-    disBtn.onclick = () => handleDiscardTile(selectedTile);
-    btns.appendChild(disBtn);
-  } else {
-    if (!room.finalSwapUsed[myUid] && room.discard.length > 0) {
-      const swapBtn = document.createElement("button");
-      swapBtn.className = "btn btn-accent";
-      swapBtn.disabled = !selectedTile;
-      swapBtn.textContent = selectedTile ? "✨ 選択牌と川を交換（最終1回）" : "交換する手牌を選択";
-      swapBtn.onclick = () => { interactionMode = "finalSwapRiver"; renderGame(currentRoom); };
-      btns.appendChild(swapBtn);
+    .card-compact {
+      background: var(--card);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
     }
-    const endBtn = document.createElement("button");
-    endBtn.className = "btn btn-sub";
-    endBtn.textContent = "この12枚で終了（命名フェーズへ）";
-    endBtn.onclick = handleFinish20th;
-    btns.appendChild(endBtn);
-  }
-}
-
-async function handleHandTileClick(tile, room) {
-  if (interactionMode === "copyTarget") {
-    if (tile.uid === selectedUid || tile.kind === "special" || tile.kind === "dora") return;
-    const myHand = getOrderedHand(room.hands[myUid]);
-    const copyIdx = myHand.findIndex(t => t.uid === selectedUid);
-    if (copyIdx === -1) return;
-    const newTile = { ...tile, uid: myHand[copyIdx].uid, isCopied: true };
-    myHand[copyIdx] = newTile;
-    interactionMode = "normal";
-    selectedUid = null;
-    await updateRoom(currentRoomCode, { [`hands.${myUid}`]: myHand });
-    return;
-  }
-
-  if (!selectedUid) {
-    selectedUid = tile.uid;
-  } else if (selectedUid === tile.uid) {
-    selectedUid = null;
-  } else {
-    // 並び替え
-    const idxA = localHandUids.indexOf(selectedUid);
-    const idxB = localHandUids.indexOf(tile.uid);
-    if (idxA !== -1 && idxB !== -1) {
-      [localHandUids[idxA], localHandUids[idxB]] = [localHandUids[idxB], localHandUids[idxA]];
+    .hero-card h1 { margin: 0 0 6px; text-align: center; }
+    .subtitle { text-align: center; color: var(--muted); margin-bottom: 18px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-weight: bold; margin-bottom: 6px; }
+    input[type="text"], input[type="tel"] {
+      width: 100%; padding: 10px 12px; border: 2px solid var(--border);
+      border-radius: 10px; font-size: 1rem;
     }
-    selectedUid = null;
-  }
-  renderGame(currentRoom);
-}
-
-async function handleDrawTile() {
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    if (data.turnOrder[data.turnIndex] !== myUid || data.turnPhase !== "draw") return;
-    const state = {
-      deck: [...data.deck],
-      discard: [...data.discard],
-      excluded: [...data.excluded],
-      doras: { ...data.doras, [myUid]: [...(data.doras[myUid] || [])] }
-    };
-    const tile = drawNonDoraTile(state, myUid);
-    const hand = [...data.hands[myUid]];
-    if (tile) hand.push(tile);
-
-    tx.update(ref, {
-      deck: state.deck,
-      discard: state.discard,
-      excluded: state.excluded,
-      [`doras.${myUid}`]: state.doras[myUid],
-      [`hands.${myUid}`]: hand,
-      [`drawCounts.${myUid}`]: (data.drawCounts[myUid] || 0) + 1,
-      turnPhase: "action"
-    });
-  });
-}
-
-async function handleRiverClick(riverIdx) {
-  const mode = interactionMode;
-  const selUid = selectedUid;
-  interactionMode = "normal";
-  selectedUid = null;
-
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const hand = getOrderedHand(data.hands[myUid]);
-    const handIdx = hand.findIndex(t => t.uid === selUid);
-    if (handIdx === -1 || riverIdx >= data.discard.length) return;
-
-    const discard = [...data.discard];
-    const excluded = [...data.excluded];
-    const targetFromRiver = discard.splice(riverIdx, 1)[0];
-    const givenTile = hand[handIdx];
-    hand[handIdx] = targetFromRiver;
-
-    if (mode === "exchangeRiver") {
-      excluded.push(givenTile);
-      tx.update(ref, {
-        [`hands.${myUid}`]: hand,
-        discard,
-        excluded
-      });
-    } else if (mode === "finalSwapRiver") {
-      discard.push(givenTile);
-      tx.update(ref, {
-        [`hands.${myUid}`]: hand,
-        discard,
-        [`finalSwapUsed.${myUid}`]: true
-      });
+    .lobby-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .lobby-box { background: #fffcf8; border: 1.5px solid var(--border); border-radius: 12px; padding: 14px; }
+    .lobby-box h3 { margin-top: 0; }
+    .lobby-box input { margin-bottom: 10px; }
+    .btn {
+      border: none; border-radius: 10px; padding: 10px 14px;
+      font-size: 0.95rem; font-weight: bold; cursor: pointer; transition: 0.15s;
     }
-  });
-}
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-sm { padding: 6px 10px; font-size: 0.85rem; }
+    .btn-lg { padding: 14px; font-size: 1.05rem; }
+    .btn-block { width: 100%; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-sub { background: #efe4d8; color: var(--text); }
+    .btn-danger { background: #e05252; color: #fff; }
+    .btn-win {
+      background: linear-gradient(135deg, #ff9a3c, #ff4e50);
+      color: #fff; animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+    .badge { background: #ffe8d6; padding: 4px 10px; border-radius: 99px; font-weight: bold; font-size: 0.85rem; }
+    .alert { background: #fff3cd; border: 1px solid #ffe69c; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; }
+    .error-text { color: #d93838; font-weight: bold; text-align: center; min-height: 1.2em; }
+    .small-note { font-size: 0.82rem; color: var(--muted); }
+    .room-code-display { font-size: 1.4rem; text-align: center; background: #fff4eb; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
+    .player-list { list-style: none; padding: 0; margin: 10px 0 18px; }
+    .player-list li { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .game-top-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+    .turn-banner { background: #fff0e6; padding: 4px 12px; border-radius: 99px; font-weight: bold; }
+    .turn-banner.is-mine { background: var(--primary); color: #fff; }
+    .players-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .p-chip {
+      background: var(--card); border: 1.5px solid var(--border); border-radius: 10px; padding: 8px; font-size: 0.82rem;
+    }
+    .p-chip.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(255,123,84,0.25); }
+    .p-chip.done { background: #f3f7f0; border-color: #9dc88d; }
+    .area-title { font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; }
+    .river-tiles { display: flex; flex-wrap: wrap; gap: 6px; min-height: 54px; max-height: 165px; overflow-y: auto; }
+    .hand-tiles { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .tile {
+      width: 68px; min-height: 86px; border: 2px solid #d9c3ae; border-radius: 10px;
+      background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+      padding: 4px 3px; cursor: pointer; user-select: none; position: relative; transition: transform 0.12s;
+      text-align: center;
+    }
+    .tile.cat { background: var(--cat-bg); border-color: #f3c19d; }
+    .tile.item { background: var(--item-bg); border-color: #9edcd7; }
+    .tile.special { background: var(--special-bg); border-color: #f0d060; }
+    .tile.mini { width: 52px; min-height: 64px; font-size: 0.72rem; }
+    .tile.selected { transform: translateY(-7px); border-color: var(--primary); box-shadow: 0 4px 10px rgba(255,123,84,0.4); }
+    .tile.selectable-target { border-color: #2b8a3e; box-shadow: 0 0 0 2px rgba(43,138,62,0.35); }
+    .tile-emoji { font-size: 1.45rem; line-height: 1.1; }
+    .tile.mini .tile-emoji { font-size: 1.15rem; }
+    .tile-tag {
+      font-size: 0.67rem; font-weight: bold; line-height: 1.15;
+      background: rgba(255,255,255,0.85); padding: 1px 4px; border-radius: 4px; width: 100%;
+      word-break: keep-all; overflow: hidden;
+    }
+    .tile-expr {
+      font-size: 0.64rem; color: #fff; background: #7a6b63; padding: 1px 4px; border-radius: 4px; width: 100%;
+    }
+    .tile-badge-copy {
+      position: absolute; top: -6px; right: -4px; background: #6741d9; color: #fff;
+      font-size: 0.6rem; padding: 1px 4px; border-radius: 6px;
+    }
+    .my-info-row { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.9rem; margin-bottom: 6px; }
+    .dora-mini-list { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+    .action-guide { font-weight: bold; color: var(--primary-dark); margin: 6px 0; font-size: 0.92rem; }
+    .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .naming-box { display: flex; gap: 8px; margin: 12px 0 18px; }
+    .naming-box input { flex: 1; }
+    .vote-cards-list { display: grid; gap: 14px; margin-top: 12px; }
+    .vote-card { border: 2px solid var(--border); border-radius: 12px; padding: 12px; background: #fffcf9; }
+    .vote-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .vote-role-name { font-size: 1.1rem; font-weight: bold; color: var(--primary-dark); }
+    .vote-hand-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    table.result-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+    table.result-table th, table.result-table td { border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: left; }
+    .result-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center; z-index: 100; padding: 14px;
+    }
+    .modal-content {
+      background: #fff; border-radius: 16px; max-width: 560px; width: 100%;
+      max-height: 85vh; overflow-y: auto; padding: 20px; position: relative;
+    }
+    .modal-close {
+      position: absolute; top: 10px; right: 12px; border: none; background: none; font-size: 1.5rem; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">🐱 にゃんジャラ</div>
+    <div class="header-actions">
+      <span id="header-room-badge" class="badge hidden">部屋: ----</span>
+      <button id="btn-show-rules" class="btn btn-sub btn-sm">ルール</button>
+      <button id="btn-leave-room" class="btn btn-danger btn-sm hidden">退室</button>
+    </div>
+  </header>
 
-async function handleDiscardTile(tile) {
-  selectedUid = null;
-  interactionMode = "normal";
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const hand = getOrderedHand(data.hands[myUid]).filter(t => t.uid !== tile.uid);
-    const discard = [...data.discard, tile];
-    const { nextIndex, allDone } = advanceTurn(data);
-
-    tx.update(ref, {
-      [`hands.${myUid}`]: hand,
-      discard,
-      turnIndex: nextIndex,
-      turnPhase: "draw",
-      phase: allDone ? "naming" : "playing"
-    });
-  });
-}
-
-async function handleWin(evalResult) {
-  selectedUid = null;
-  interactionMode = "normal";
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const ordered = getOrderedHand(data.hands[myUid]);
-    const updated = { ...data, statuses: { ...data.statuses, [myUid]: "won" } };
-    const { nextIndex, allDone } = advanceTurn(updated);
-
-    tx.update(ref, {
-      [`hands.${myUid}`]: ordered,
-      [`statuses.${myUid}`]: "won",
-      [`winResults.${myUid}`]: evalResult,
-      turnIndex: nextIndex,
-      turnPhase: "draw",
-      phase: allDone ? "naming" : "playing"
-    });
-  });
-}
-
-async function handleFinish20th() {
-  selectedUid = null;
-  interactionMode = "normal";
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const ordered = getOrderedHand(data.hands[myUid]);
-    const updated = { ...data, statuses: { ...data.statuses, [myUid]: "finished" } };
-    const { nextIndex, allDone } = advanceTurn(updated);
-
-    tx.update(ref, {
-      [`hands.${myUid}`]: ordered,
-      [`statuses.${myUid}`]: "finished",
-      turnIndex: nextIndex,
-      turnPhase: "draw",
-      phase: allDone ? "naming" : "playing"
-    });
-  });
-}
-
-function renderVotePhase(room) {
-  showScreen("vote");
-  const isNaming = room.phase === "naming";
-  $("vote-phase-title").textContent = isNaming ? "🎨 自分の役に名前をつけよう！" : "🗳️ 一番いい役名・組み合わせに投票！";
-  $("vote-phase-desc").textContent = isNaming
-    ? "上がった人も上がれなかった人も、自分の12枚にステキな名前をつけてください。"
-    : "自分以外のプレイヤーから1人選んで投票してください（1票＝＋50点、ドラ倍率あり）。";
-
-  const alreadyNamed = Boolean(room.names[myUid]);
-  $("naming-input-box").classList.toggle("hidden", !isNaming || alreadyNamed);
-
-  const list = $("vote-cards-list");
-  list.innerHTML = "";
-  const alreadyVoted = Boolean(room.votes[myUid]);
-
-  for (const uid of room.turnOrder) {
-    const p = room.players[uid];
-    const hand = room.hands[uid] || [];
-    const win = room.winResults[uid];
-    const doraCount = (room.doras[uid] || []).length;
-    const roleName = room.names[uid] || "（名前を考え中…）";
-
-    const card = document.createElement("div");
-    card.className = "vote-card";
-    card.innerHTML = `
-      <div class="vote-card-head">
-        <div>
-          <strong>${p.name}</strong> ${uid === myUid ? "(あなた)" : ""}
-          <span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}｜ドラ${doraCount}枚</span>
+  <main id="app">
+    <!-- 1. ロビー画面 -->
+    <section id="screen-lobby" class="screen">
+      <div class="card hero-card">
+        <h1>🐱 にゃんジャラ</h1>
+        <p class="subtitle">猫と小物を集めて、自分だけの役名をつけよう！（2〜6人対戦）</p>
+        <div id="config-warning" class="alert hidden">
+          ⚠️ まだ <code>index.html</code> 内の <code>firebaseConfig</code> にFirebaseの設定が入っていません。設定を貼り付けてからご利用ください。
         </div>
-        <div class="vote-role-name">「${roleName}」</div>
+        <div class="form-group">
+          <label for="input-player-name">あなたの名前</label>
+          <input id="input-player-name" type="text" maxlength="10" placeholder="例：みけねこ" />
+        </div>
+        <div class="lobby-grid">
+          <div class="lobby-box">
+            <h3>新しく部屋を作る</h3>
+            <p class="small-note">4桁の部屋コードが自動発行されます。</p>
+            <button id="btn-create-room" class="btn btn-primary btn-block">部屋を作る（ホスト）</button>
+          </div>
+          <div class="lobby-box">
+            <h3>友達の部屋に入る</h3>
+            <input id="input-room-code" type="tel" maxlength="4" placeholder="4桁の数字（例: 1234）" />
+            <button id="btn-join-room" class="btn btn-accent btn-block">部屋に入る</button>
+          </div>
+        </div>
+        <p id="lobby-error" class="error-text"></p>
       </div>
-    `;
-    const row = document.createElement("div");
-    row.className = "vote-hand-row";
-    hand.forEach(t => row.appendChild(createTileEl(t, { mini: true })));
-    card.appendChild(row);
+    </section>
 
-    if (!isNaming && uid !== myUid) {
-      const btn = document.createElement("button");
-      btn.className = "btn btn-accent btn-sm";
-      btn.disabled = alreadyVoted;
-      btn.textContent = room.votes[myUid] === uid ? "✔ 投票済み" : alreadyVoted ? "投票完了" : "❤️ この役に投票する";
-      btn.onclick = () => handleVoteSubmit(uid);
-      card.appendChild(btn);
+    <!-- 2. 待機ルーム画面 -->
+    <section id="screen-waiting" class="screen hidden">
+      <div class="card">
+        <h2>待機ルーム</h2>
+        <div class="room-code-display">
+          部屋コード：<strong id="waiting-room-code">----</strong>
+          <button id="btn-copy-code" class="btn btn-sub btn-sm">コピー</button>
+        </div>
+        <p class="small-note">別アプリでコードを友達に送ってから戻ってきても、この部屋のまま待機できます。</p>
+        <h3>参加メンバー（<span id="waiting-player-count">0</span>/6人）</h3>
+        <ul id="waiting-player-list" class="player-list"></ul>
+        <div id="host-start-area" class="hidden">
+          <button id="btn-start-game" class="btn btn-primary btn-lg btn-block">ゲーム開始！（全4ラウンド）</button>
+        </div>
+        <p id="waiting-guest-msg" class="small-note">ホストがゲームを開始するまでお待ちください…</p>
+      </div>
+    </section>
+
+    <!-- 3. ゲーム画面 -->
+    <section id="screen-game" class="screen hidden">
+      <div class="game-top-bar card-compact">
+        <div><strong>ラウンド <span id="game-round">1</span> / 4</strong></div>
+        <div>山札残り: <strong id="game-deck-count">0</strong>枚</div>
+        <div id="game-turn-banner" class="turn-banner">---</div>
+      </div>
+
+      <div id="game-players-bar" class="players-bar"></div>
+
+      <div class="card-compact river-area">
+        <div class="area-title">みんなの捨て牌（川） <span id="river-hint" class="small-note"></span></div>
+        <div id="river-tiles" class="river-tiles"></div>
+      </div>
+
+      <div class="card-compact my-status-area">
+        <div class="my-info-row">
+          <span>あなたの巡目: <strong id="my-draw-count">0</strong> / 20</span>
+          <span>所持ドラ: <strong id="my-dora-count">0</strong>枚（倍率 <strong id="my-dora-mult">×1</strong>）</span>
+        </div>
+        <div id="my-dora-list" class="dora-mini-list"></div>
+        <div id="action-guide" class="action-guide"></div>
+        <div id="action-buttons" class="action-buttons"></div>
+      </div>
+
+      <div class="card-compact hand-area">
+        <div class="area-title">
+          あなたの手牌（<span id="my-hand-count">0</span>枚）
+          <span class="small-note">※タップで選択／別牌タップで並び替え</span>
+        </div>
+        <div id="my-hand-tiles" class="hand-tiles"></div>
+      </div>
+    </section>
+
+    <!-- 4. 命名・投票フェーズ画面 -->
+    <section id="screen-vote" class="screen hidden">
+      <div class="card">
+        <h2 id="vote-phase-title">役名をつけよう！</h2>
+        <p id="vote-phase-desc" class="small-note"></p>
+        <div id="naming-input-box" class="naming-box hidden">
+          <input id="input-role-name" type="text" maxlength="20" placeholder="例：雪見こたつ猫セット" />
+          <button id="btn-submit-name" class="btn btn-primary">役名を決定！</button>
+        </div>
+        <div id="vote-cards-list" class="vote-cards-list"></div>
+      </div>
+    </section>
+
+    <!-- 5. 結果画面 -->
+    <section id="screen-result" class="screen hidden">
+      <div class="card">
+        <h2 id="result-title">ラウンド結果</h2>
+        <div id="result-table-wrap"></div>
+        <div id="result-next-area" class="result-actions"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ルールモーダル -->
+  <div id="modal-rules" class="modal hidden">
+    <div class="modal-content">
+      <button id="btn-close-rules" class="modal-close">×</button>
+      <h2>🐱 にゃんジャラ ルール</h2>
+      <ul>
+        <li><strong>手番</strong>：初期11枚。山札から1枚引き、1枚捨てる（20巡目まで／ポン・チー・ロンなし）。</li>
+        <li><strong>上がり形（12枚）</strong>：
+          <ul>
+            <li><b>3×4（100点）</b>／<b>2×6（100点）</b>：各組が「同じ牌」「同じ猫種」「同じ表情」のいずれかで成立。</li>
+            <li><b>1×12 オール別猫（200点）</b>：すべて猫牌かつ12枚すべて違う猫種。</li>
+            <li><b>1×12 別猫＋小物バラバラ（100点）</b>：同じ猫種も小物も一切被らない12枚。</li>
+            <li><b>1×12 オール猫（60点）</b>：すべて猫牌（猫種被りあり）。</li>
+          </ul>
+        </li>
+        <li><strong>特別牌</strong>：コピー牌（手牌1枚に変身）／交換牌（川の1枚と交換）／オールマイティー（万能）／ドラ牌（追加ツモ＋得点倍率 ×1.5 / ×2 / ×3）。※コピー・交換牌は未処理のまま上がれません。</li>
+        <li><strong>最終特別ルール</strong>：20巡目に役ができなかった場合、1回だけ川の牌と手牌1枚を入れ替えられます。</li>
+        <li><strong>投票フェーズ</strong>：誰かが上がっても残りの人は20巡目まで続行し、最後に<b>全員</b>が役名をつけて投票（1票＋50点、ドラ倍率有効）！</li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js";
+    import {
+      getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, runTransaction
+    } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
+
+    // =========================================================
+    // ★ここを書き換える★ Firebaseコンソールの設定を貼り付けてください
+    // =========================================================
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.firebasestorage.app",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    // =========================================================
+
+    function isFirebaseConfigured() {
+      return firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_");
     }
-    list.appendChild(card);
-  }
-}
 
-async function handleVoteSubmit(targetUid) {
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const votes = { ...data.votes, [myUid]: targetUid };
-    const allVoted = data.turnOrder.every(uid => Boolean(votes[uid]));
+    // =========================================================
+    // 牌データ定義・山札生成
+    // =========================================================
+    const CAT_TYPES = [
+      { id: "kuro", name: "黒猫", emoji: "🐈‍⬛" },
+      { id: "shiro", name: "白猫", emoji: "🐱" },
+      { id: "chatora", name: "茶トラ", emoji: "🐯" },
+      { id: "kijitora", name: "キジトラ", emoji: "🦊" },
+      { id: "mike", name: "三毛猫", emoji: "🍡" },
+      { id: "sabatora", name: "サバトラ", emoji: "🐟" },
+      { id: "hachiware", name: "ハチワレ", emoji: "🐼" },
+      { id: "sabi", name: "サビ猫", emoji: "🍂" },
+      { id: "shamu", name: "シャム猫", emoji: "💎" },
+      { id: "persian", name: "ペルシャ", emoji: "👑" },
+      { id: "munchkin", name: "マンチカン", emoji: "🐾" },
+      { id: "scottish", name: "スコティッシュ", emoji: "🎀" },
+      { id: "amesho", name: "アメショ", emoji: "⭐" },
+      { id: "norwegian", name: "ノルウェージャン", emoji: "🏔️" },
+      { id: "koneko", name: "子猫", emoji: "🍼" }
+    ];
 
-    if (!allVoted) {
-      tx.update(ref, { [`votes.${myUid}`]: targetUid });
-      return;
+    const EXPRESSIONS = [
+      { id: "normal", name: "普通", emoji: "😐" },
+      { id: "smile", name: "笑顔", emoji: "😊" },
+      { id: "sleep", name: "寝ている", emoji: "😴" },
+      { id: "angry", name: "怒っている", emoji: "😾" }
+    ];
+
+    const ITEM_TYPES = [
+      { id: "fish", name: "魚", emoji: "🐠" },
+      { id: "bird", name: "小鳥", emoji: "🐦" },
+      { id: "sakura", name: "桜", emoji: "🌸" },
+      { id: "koban", name: "小判", emoji: "🪙" },
+      { id: "dango", name: "三色団子", emoji: "🍡" },
+      { id: "bell", name: "鈴", emoji: "🔔" },
+      { id: "yarn", name: "毛糸玉", emoji: "🧶" },
+      { id: "jarashi", name: "猫じゃらし", emoji: "🌾" },
+      { id: "bone", name: "魚の骨", emoji: "🦴" },
+      { id: "paw", name: "肉球", emoji: "🐾" },
+      { id: "moon", name: "月", emoji: "🌙" },
+      { id: "taiyaki", name: "たい焼き", emoji: "🧇" },
+      { id: "mouse", name: "ねずみ", emoji: "🐭" },
+      { id: "temari", name: "手毬", emoji: "🏐" },
+      { id: "snow", name: "雪", emoji: "❄️" }
+    ];
+
+    const SPECIAL_TYPES = [
+      { id: "copy", name: "コピー牌", emoji: "📋", sub: "1枚コピー" },
+      { id: "exchange", name: "交換牌", emoji: "🔄", sub: "川と交換" },
+      { id: "almighty", name: "オールマイティー", emoji: "🌈", sub: "万能牌" },
+      { id: "dora", name: "ドラ牌", emoji: "✨", sub: "倍率UP" }
+    ];
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
     }
 
-    // 全員投票完了 → 得点集計
-    const voteCounts = {};
-    for (const uid of data.turnOrder) voteCounts[uid] = 0;
-    for (const v of Object.values(votes)) {
-      if (voteCounts[v] !== undefined) voteCounts[v]++;
+    function createDeckForPlayers(playerCount) {
+      const catSets = playerCount <= 3 ? 1 : 2;
+      const itemKindCount = playerCount === 2 ? 8 : playerCount <= 4 ? 12 : 15;
+      let seq = 1;
+      const deck = [];
+
+      for (let s = 0; s < catSets; s++) {
+        for (const cat of CAT_TYPES) {
+          for (const expr of EXPRESSIONS) {
+            deck.push({
+              uid: `t_${seq++}`, kind: "cat", tileId: `cat_${cat.id}_${expr.id}`,
+              catType: cat.id, catName: cat.name, catEmoji: cat.emoji,
+              expr: expr.id, exprName: expr.name, exprEmoji: expr.emoji
+            });
+          }
+        }
+      }
+
+      const chosenItems = shuffle(ITEM_TYPES).slice(0, itemKindCount);
+      for (const item of chosenItems) {
+        for (let c = 0; c < 3; c++) {
+          deck.push({
+            uid: `t_${seq++}`, kind: "item", tileId: `item_${item.id}`,
+            itemName: item.name, itemEmoji: item.emoji
+          });
+        }
+      }
+
+      for (const sp of SPECIAL_TYPES) {
+        for (let c = 0; c < 3; c++) {
+          deck.push({
+            uid: `t_${seq++}`,
+            kind: sp.id === "almighty" ? "almighty" : sp.id === "dora" ? "dora" : "special",
+            specialId: sp.id, tileId: `sp_${sp.id}`,
+            specialName: sp.name, specialEmoji: sp.emoji, specialSub: sp.sub
+          });
+        }
+      }
+      return shuffle(deck);
     }
 
-    const roundResults = [];
-    const playerPatches = {};
-    for (const uid of data.turnOrder) {
-      const base = data.winResults[uid]?.score || 0;
-      const vCount = voteCounts[uid];
-      const vScore = vCount * 50;
-      const dCount = (data.doras[uid] || []).length;
-      const mult = getDoraMultiplier(dCount);
-      const roundTotal = Math.ceil((base + vScore) * mult);
-      const newTotal = data.players[uid].totalScore + roundTotal;
+    // =========================================================
+    // 役判定・得点計算
+    // =========================================================
+    function isValidGroup(group) {
+      const nonWilds = group.filter(t => t.kind !== "almighty");
+      if (nonWilds.length <= 1) return true;
+      if (nonWilds.every(t => t.tileId === nonWilds[0].tileId)) return true;
+      if (nonWilds.every(t => t.kind === "cat")) {
+        const sameCat = nonWilds.every(t => t.catType === nonWilds[0].catType);
+        const sameExpr = nonWilds.every(t => t.expr === nonWilds[0].expr);
+        if (sameCat || sameExpr) return true;
+      }
+      return false;
+    }
 
-      playerPatches[`players.${uid}.totalScore`] = newTotal;
-      roundResults.push({
-        uid,
-        name: data.players[uid].name,
-        roleName: data.names[uid] || "",
-        base,
-        vCount,
-        vScore,
-        mult,
-        roundTotal,
-        newTotal
+    function canForm3x4(tiles) {
+      const used = new Array(tiles.length).fill(false);
+      function dfs(remaining) {
+        if (remaining === 0) return true;
+        const i = used.indexOf(false);
+        used[i] = true;
+        for (let j = i + 1; j < tiles.length; j++) {
+          if (used[j]) continue;
+          for (let k = j + 1; k < tiles.length; k++) {
+            if (used[k]) continue;
+            if (isValidGroup([tiles[i], tiles[j], tiles[k]])) {
+              used[j] = used[k] = true;
+              if (dfs(remaining - 3)) return true;
+              used[j] = used[k] = false;
+            }
+          }
+        }
+        used[i] = false;
+        return false;
+      }
+      return dfs(tiles.length);
+    }
+
+    function canForm2x6(tiles) {
+      const used = new Array(tiles.length).fill(false);
+      function dfs(remaining) {
+        if (remaining === 0) return true;
+        const i = used.indexOf(false);
+        used[i] = true;
+        for (let j = i + 1; j < tiles.length; j++) {
+          if (used[j]) continue;
+          if (isValidGroup([tiles[i], tiles[j]])) {
+            used[j] = true;
+            if (dfs(remaining - 2)) return true;
+            used[j] = false;
+          }
+        }
+        used[i] = false;
+        return false;
+      }
+      return dfs(tiles.length);
+    }
+
+    function evaluateHand(tiles) {
+      if (!tiles || tiles.length !== 12) return null;
+      if (tiles.some(t => t.kind === "special" || t.kind === "dora")) return null;
+
+      const candidates = [];
+      const cats = tiles.filter(t => t.kind === "cat");
+      const items = tiles.filter(t => t.kind === "item");
+      const onlyCatOrWild = tiles.every(t => t.kind === "cat" || t.kind === "almighty");
+      const uniqueCatTypes = new Set(cats.map(t => t.catType));
+      const uniqueItemIds = new Set(items.map(t => t.tileId));
+
+      if (onlyCatOrWild && uniqueCatTypes.size === cats.length) {
+        candidates.push({ score: 200, label: "1×12 オール別猫" });
+      }
+      if (uniqueCatTypes.size === cats.length && uniqueItemIds.size === items.length) {
+        candidates.push({ score: 100, label: "1×12 別猫＆小物バラバラ" });
+      }
+      if (canForm3x4(tiles)) candidates.push({ score: 100, label: "3×4 完成" });
+      if (canForm2x6(tiles)) candidates.push({ score: 100, label: "2×6 完成" });
+      if (onlyCatOrWild) candidates.push({ score: 60, label: "1×12 オール猫" });
+
+      if (candidates.length === 0) return null;
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0];
+    }
+
+    function getDoraMultiplier(doraCount) {
+      if (doraCount >= 3) return 3;
+      if (doraCount === 2) return 2;
+      if (doraCount === 1) return 1.5;
+      return 1;
+    }
+
+    // =========================================================
+    // Firebase 通信・ルーム管理
+    // =========================================================
+    let app = null, auth = null, db = null;
+
+    function initFirebase(onUserReady) {
+      if (!isFirebaseConfigured()) { onUserReady(null); return; }
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+      onAuthStateChanged(auth, async (user) => {
+        if (user) onUserReady(user);
+        else await signInAnonymously(auth);
       });
     }
-    roundResults.sort((a, b) => b.newTotal - a.newTotal);
 
-    tx.update(ref, {
-      [`votes.${myUid}`]: targetUid,
-      ...playerPatches,
-      roundResults,
-      phase: "roundResult"
-    });
-  });
-}
+    const getRoomRef = (code) => doc(db, "rooms", code);
 
-function renderResult(room) {
-  showScreen("result");
-  const isFinal = room.round >= 4;
-  $("result-title").textContent = isFinal ? "🏆 最終結果（全4ラウンド終了）" : `📊 ラウンド ${room.round} 結果`;
-
-  const rows = (room.roundResults || []).map((r, i) => `
-    <tr>
-      <td>${i + 1}位</td>
-      <td><strong>${r.name}</strong><br><span class="small-note">「${r.roleName}」</span></td>
-      <td>${r.base} + ${r.vScore}(${r.vCount}票) × ${r.mult} = <strong>${r.roundTotal}点</strong></td>
-      <td><strong>${r.newTotal}点</strong></td>
-    </tr>
-  `).join("");
-
-  $("result-table-wrap").innerHTML = `
-    <table class="result-table">
-      <thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点</th><th>累計</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-
-  const area = $("result-next-area");
-  area.innerHTML = "";
-  if (room.hostUid === myUid) {
-    const btn = document.createElement("button");
-    btn.className = "btn btn-primary";
-    btn.textContent = isFinal ? "同じメンバーで最初から遊ぶ" : `次のラウンドへ（${room.round + 1}/4）`;
-    btn.onclick = async () => {
-      if (isFinal) {
-        const patches = {};
-        for (const uid of room.turnOrder) patches[`players.${uid}.totalScore`] = 0;
-        const nextState = buildRoundInitialState(room.players, room.turnOrder, 1);
-        await updateRoom(currentRoomCode, { ...patches, ...nextState });
-      } else {
-        const nextState = buildRoundInitialState(room.players, room.turnOrder, room.round + 1);
-        await updateRoom(currentRoomCode, nextState);
+    async function createRoom(uid, playerName) {
+      let code = "";
+      for (let attempt = 0; attempt < 15; attempt++) {
+        code = String(Math.floor(1000 + Math.random() * 9000));
+        const snap = await getDoc(getRoomRef(code));
+        if (!snap.exists()) break;
       }
-    };
-    area.appendChild(btn);
-  } else {
-    area.innerHTML = `<p class="small-note">ホストの操作をお待ちください…</p>`;
-  }
-}
-
-function enterRoom(code) {
-  currentRoomCode = code;
-  localStorage.setItem(LS_ROOM, code);
-  if (unsubRoom) unsubRoom();
-  unsubRoom = subscribeRoom(code, (room) => {
-    currentRoom = room;
-    if (room.phase === "waiting") renderWaiting(room);
-    else if (room.phase === "playing") renderGame(room);
-    else if (room.phase === "naming" || room.phase === "voting") renderVotePhase(room);
-    else if (room.phase === "roundResult") renderResult(room);
-  });
-}
-
-// 初期化＆イベント設定
-$("input-player-name").value = localStorage.getItem(LS_NAME) || "";
-$("config-warning").classList.toggle("hidden", isFirebaseConfigured());
-
-initFirebase(async (user) => {
-  if (!user) return;
-  myUid = user.uid;
-
-  // 別ページ・リロードからの自動復帰
-  const savedRoom = localStorage.getItem(LS_ROOM);
-  if (savedRoom) {
-    const ok = await checkRoomMembership(savedRoom, myUid);
-    if (ok) {
-      enterRoom(savedRoom);
-      return;
-    } else {
-      localStorage.removeItem(LS_ROOM);
+      await setDoc(getRoomRef(code), {
+        code, hostUid: uid, phase: "waiting", round: 1,
+        players: { [uid]: { uid, name: playerName, totalScore: 0, order: 0 } },
+        turnOrder: [uid], turnIndex: 0, turnPhase: "draw",
+        deck: [], discard: [], excluded: [], hands: {}, doras: {},
+        drawCounts: {}, statuses: {}, winResults: {}, finalSwapUsed: {},
+        names: {}, votes: {}, roundResults: null
+      });
+      return code;
     }
-  }
-  showScreen("lobby");
-});
 
-$("btn-create-room").onclick = async () => {
-  const name = $("input-player-name").value.trim();
-  if (!name) return ($("lobby-error").textContent = "名前を入力してください。");
-  localStorage.setItem(LS_NAME, name);
-  $("lobby-error").textContent = "";
-  try {
-    const code = await createRoom(myUid, name);
-    enterRoom(code);
-  } catch (e) {
-    $("lobby-error").textContent = e.message;
-  }
-};
+    async function joinRoom(code, uid, playerName) {
+      const ref = getRoomRef(code);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) throw new Error("その部屋コードは見つかりません。");
+        const data = snap.data();
+        if (data.players[uid]) {
+          tx.update(ref, { [`players.${uid}.name`]: playerName });
+          return;
+        }
+        if (data.phase !== "waiting") throw new Error("すでにゲームが始まっています。");
+        const count = Object.keys(data.players).length;
+        if (count >= 6) throw new Error("この部屋は満員（6人）です。");
+        tx.update(ref, {
+          [`players.${uid}`]: { uid, name: playerName, totalScore: 0, order: count },
+          turnOrder: [...data.turnOrder, uid]
+        });
+      });
+    }
 
-$("btn-join-room").onclick = async () => {
-  const name = $("input-player-name").value.trim();
-  const code = $("input-room-code").value.trim();
-  if (!name) return ($("lobby-error").textContent = "名前を入力してください。");
-  if (!/^\d{4}$/.test(code)) return ($("lobby-error").textContent = "4桁の数字を入力してください。");
-  localStorage.setItem(LS_NAME, name);
-  $("lobby-error").textContent = "";
-  try {
-    await joinRoom(code, myUid, name);
-    enterRoom(code);
-  } catch (e) {
-    $("lobby-error").textContent = e.message;
-  }
-};
+    async function checkRoomMembership(code, uid) {
+      if (!db || !code || !uid) return false;
+      const snap = await getDoc(getRoomRef(code));
+      return snap.exists() && Boolean(snap.data().players?.[uid]);
+    }
 
-$("btn-copy-code").onclick = () => {
-  navigator.clipboard?.writeText(currentRoomCode);
-  alert(`部屋コード「${currentRoomCode}」をコピーしました！`);
-};
+    function subscribeRoom(code, callback) {
+      return onSnapshot(getRoomRef(code), (snap) => {
+        if (snap.exists()) callback(snap.data());
+      });
+    }
 
-$("btn-start-game").onclick = async () => {
-  if (!currentRoom) return;
-  const initState = buildRoundInitialState(currentRoom.players, currentRoom.turnOrder, 1);
-  await updateRoom(currentRoomCode, initState);
-};
+    const updateRoom = (code, patch) => updateDoc(getRoomRef(code), patch);
 
-$("btn-submit-name").onclick = async () => {
-  const roleName = $("input-role-name").value.trim();
-  if (!roleName) return alert("役名を入力してください！");
-  $("input-role-name").value = "";
-  await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
-    const names = { ...data.names, [myUid]: roleName };
-    const allNamed = data.turnOrder.every(uid => Boolean(names[uid]));
-    tx.update(ref, {
-      [`names.${myUid}`]: roleName,
-      phase: allNamed ? "voting" : "naming"
+    async function runRoomTransaction(code, fn) {
+      await runTransaction(db, async (tx) => {
+        const ref = getRoomRef(code);
+        const snap = await tx.get(ref);
+        if (snap.exists()) await fn(tx, ref, snap.data());
+      });
+    }
+
+    // =========================================================
+    // ゲーム進行・画面操作
+    // =========================================================
+    const LS_ROOM = "nyanjara_room_code";
+    const LS_NAME = "nyanjara_player_name";
+
+    let myUid = null, currentRoomCode = null, currentRoom = null, unsubRoom = null;
+    let localHandUids = [], selectedUid = null, interactionMode = "normal", isBusy = false;
+    const $ = (id) => document.getElementById(id);
+
+    async function withLock(fn) {
+      if (isBusy) return;
+      isBusy = true;
+      try { await fn(); } finally { isBusy = false; }
+    }
+
+    function showScreen(name) {
+      for (const s of ["lobby", "waiting", "game", "vote", "result"]) {
+        $(`screen-${s}`).classList.toggle("hidden", s !== name);
+      }
+      const inRoom = name !== "lobby";
+      $("header-room-badge").classList.toggle("hidden", !inRoom);
+      $("btn-leave-room").classList.toggle("hidden", !inRoom);
+      if (inRoom) $("header-room-badge").textContent = `部屋: ${currentRoomCode}`;
+    }
+
+    function getOrderedHand(serverHand) {
+      const map = new Map(serverHand.map(t => [t.uid, t]));
+      localHandUids = localHandUids.filter(uid => map.has(uid));
+      for (const t of serverHand) {
+        if (!localHandUids.includes(t.uid)) localHandUids.push(t.uid);
+      }
+      return localHandUids.map(uid => map.get(uid));
+    }
+
+    function drawTileWithReshuffle(state) {
+      if (state.deck.length === 0) {
+        const pool = [...state.discard, ...state.excluded];
+        if (pool.length === 0) return null;
+        state.deck = shuffle(pool);
+        state.discard = [];
+        state.excluded = [];
+      }
+      return state.deck.shift();
+    }
+
+    function drawNonDoraTile(state, uid) {
+      for (let guard = 0; guard < 30; guard++) {
+        const tile = drawTileWithReshuffle(state);
+        if (!tile) return null;
+        if (tile.kind === "dora") state.doras[uid].push(tile);
+        else return tile;
+      }
+      return null;
+    }
+
+    function buildRoundInitialState(turnOrder, roundNum) {
+      const deck = createDeckForPlayers(turnOrder.length);
+      const state = {
+        deck, discard: [], excluded: [],
+        hands: {}, doras: {}, drawCounts: {}, statuses: {}, winResults: {}, finalSwapUsed: {}
+      };
+      for (const uid of turnOrder) {
+        state.hands[uid] = []; state.doras[uid] = []; state.drawCounts[uid] = 0;
+        state.statuses[uid] = "playing"; state.winResults[uid] = null; state.finalSwapUsed[uid] = false;
+      }
+      for (let i = 0; i < 11; i++) {
+        for (const uid of turnOrder) {
+          const tile = drawNonDoraTile(state, uid);
+          if (tile) state.hands[uid].push(tile);
+        }
+      }
+      return {
+        phase: "playing", round: roundNum, turnIndex: 0, turnPhase: "draw",
+        ...state, names: {}, votes: {}, roundResults: null
+      };
+    }
+
+    function advanceTurn(room) {
+      const n = room.turnOrder.length;
+      for (let step = 1; step <= n; step++) {
+        const idx = (room.turnIndex + step) % n;
+        if (room.statuses[room.turnOrder[idx]] === "playing") return { nextIndex: idx, allDone: false };
+      }
+      return { nextIndex: 0, allDone: true };
+    }
+
+    function createTileEl(tile, { mini = false, selected = false, targetable = false } = {}) {
+      const div = document.createElement("div");
+      const typeClass = tile.kind === "cat" ? "cat" : tile.kind === "item" ? "item" : "special";
+      div.className = `tile ${typeClass}${mini ? " mini" : ""}${selected ? " selected" : ""}${targetable ? " selectable-target" : ""}`;
+      let emoji = "", tag = "", expr = "";
+      if (tile.kind === "cat") {
+        emoji = tile.catEmoji; tag = tile.catName; expr = `${tile.exprEmoji}${tile.exprName}`;
+      } else if (tile.kind === "item") {
+        emoji = tile.itemEmoji; tag = tile.itemName;
+      } else {
+        emoji = tile.specialEmoji; tag = tile.specialName; expr = tile.specialSub;
+      }
+      div.innerHTML = `
+        ${tile.isCopied ? '<span class="tile-badge-copy">コピー</span>' : ""}
+        <div class="tile-emoji">${emoji}</div>
+        <div class="tile-tag">${tag}</div>
+        ${expr ? `<div class="tile-expr">${expr}</div>` : ""}
+      `;
+      return div;
+    }
+
+    function renderWaiting(room) {
+      showScreen("waiting");
+      $("waiting-room-code").textContent = room.code;
+      const list = $("waiting-player-list");
+      list.innerHTML = "";
+      const players = room.turnOrder.map(uid => room.players[uid]);
+      $("waiting-player-count").textContent = players.length;
+      for (const p of players) {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${p.name}</span><span>${p.uid === room.hostUid ? "👑 ホスト" : "参加者"}</span>`;
+        list.appendChild(li);
+      }
+      const isHost = room.hostUid === myUid;
+      $("host-start-area").classList.toggle("hidden", !isHost);
+      $("waiting-guest-msg").classList.toggle("hidden", isHost);
+      $("btn-start-game").disabled = players.length < 2;
+    }
+
+    function renderGame(room) {
+      showScreen("game");
+      $("game-round").textContent = room.round;
+      $("game-deck-count").textContent = room.deck.length;
+      const activeUid = room.turnOrder[room.turnIndex];
+      const isMyTurn = activeUid === myUid && room.statuses[myUid] === "playing";
+      const banner = $("game-turn-banner");
+      banner.textContent = isMyTurn ? "⭐ あなたの番です！" : `${room.players[activeUid]?.name || "---"} さんの番`;
+      banner.classList.toggle("is-mine", isMyTurn);
+
+      const pBar = $("game-players-bar");
+      pBar.innerHTML = "";
+      for (const uid of room.turnOrder) {
+        const p = room.players[uid], st = room.statuses[uid], doraCount = (room.doras[uid] || []).length;
+        const chip = document.createElement("div");
+        chip.className = `p-chip${uid === activeUid && st === "playing" ? " active" : ""}${st !== "playing" ? " done" : ""}`;
+        const stLabel = st === "won" ? "🎉 上がり待機" : st === "finished" ? "⏳ 終了待機" : `巡目 ${room.drawCounts[uid]}/20`;
+        chip.innerHTML = `<div><strong>${p.name}</strong>${uid === myUid ? " (自分)" : ""}</div><div>${p.totalScore}点 / ドラ${doraCount}枚</div><div>${stLabel}</div>`;
+        pBar.appendChild(chip);
+      }
+
+      const riverEl = $("river-tiles");
+      riverEl.innerHTML = "";
+      const riverClickable = isMyTurn && room.turnPhase === "action" && (interactionMode === "exchangeRiver" || interactionMode === "finalSwapRiver");
+      $("river-hint").textContent = riverClickable ? "（交換したい牌をタップ！）" : "";
+      room.discard.forEach((tile, idx) => {
+        const el = createTileEl(tile, { mini: true, targetable: riverClickable });
+        if (riverClickable) el.onclick = () => handleRiverClick(idx);
+        riverEl.appendChild(el);
+      });
+
+      const myHand = getOrderedHand(room.hands[myUid] || []);
+      const myDoras = room.doras[myUid] || [];
+      const myDraws = room.drawCounts[myUid] || 0;
+      $("my-draw-count").textContent = myDraws;
+      $("my-dora-count").textContent = myDoras.length;
+      $("my-dora-mult").textContent = `×${getDoraMultiplier(myDoras.length)}`;
+      $("my-hand-count").textContent = myHand.length;
+
+      const doraListEl = $("my-dora-list");
+      doraListEl.innerHTML = "";
+      myDoras.forEach(d => doraListEl.appendChild(createTileEl(d, { mini: true })));
+
+      const handEl = $("my-hand-tiles");
+      handEl.innerHTML = "";
+      myHand.forEach((tile) => {
+        const isSel = tile.uid === selectedUid;
+        const isCopyTarget = interactionMode === "copyTarget" && !isSel && tile.kind !== "special" && tile.kind !== "dora";
+        const el = createTileEl(tile, { selected: isSel, targetable: isCopyTarget });
+        el.onclick = () => handleHandTileClick(tile, room);
+        handEl.appendChild(el);
+      });
+
+      renderActionControls(room, myHand, isMyTurn, myDraws);
+    }
+
+    function renderActionControls(room, myHand, isMyTurn, myDraws) {
+      const guide = $("action-guide"), btns = $("action-buttons");
+      btns.innerHTML = "";
+
+      if (room.statuses[myUid] !== "playing") {
+        guide.textContent = "あなたは待機中です。他のプレイヤーが終わるまでお待ちください。"; return;
+      }
+      if (!isMyTurn) {
+        guide.textContent = "他のプレイヤーの番です（手牌のタップで並び替えができます）。"; return;
+      }
+      if (room.turnPhase === "draw") {
+        guide.textContent = "山札から1枚引いてください。";
+        const btnDraw = document.createElement("button");
+        btnDraw.className = "btn btn-primary";
+        btnDraw.textContent = "🎴 山札から1枚引く";
+        btnDraw.onclick = handleDrawTile;
+        btns.appendChild(btnDraw);
+        return;
+      }
+      if (interactionMode === "copyTarget") {
+        guide.textContent = "📋 コピーしたい自分の手牌を1枚タップしてください！";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "btn btn-sub"; cancelBtn.textContent = "キャンセル";
+        cancelBtn.onclick = () => { interactionMode = "normal"; renderGame(currentRoom); };
+        btns.appendChild(cancelBtn);
+        return;
+      }
+      if (interactionMode === "exchangeRiver" || interactionMode === "finalSwapRiver") {
+        guide.textContent = "🔄 川（捨て牌）から手に入れたい牌を1枚タップしてください！";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "btn btn-sub"; cancelBtn.textContent = "キャンセル";
+        cancelBtn.onclick = () => { interactionMode = "normal"; renderGame(currentRoom); };
+        btns.appendChild(cancelBtn);
+        return;
+      }
+
+      const evalResult = evaluateHand(myHand);
+      const selectedTile = myHand.find(t => t.uid === selectedUid);
+      const isFinalTurn = myDraws >= 20;
+
+      guide.textContent = isFinalTurn
+        ? "【20巡目】上がるか、特別ルールで川の牌と交換、または終了してください。"
+        : "牌を選んで捨てるか、特別牌・上がりを使用してください。";
+
+      if (evalResult) {
+        const winBtn = document.createElement("button");
+        winBtn.className = "btn btn-win";
+        winBtn.textContent = `🎉 上がり宣言！（${evalResult.label}：${evalResult.score}点）`;
+        winBtn.onclick = () => handleWin(evalResult);
+        btns.appendChild(winBtn);
+      }
+      if (selectedTile?.specialId === "copy") {
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "btn btn-accent"; copyBtn.textContent = "📋 コピー牌を使う";
+        copyBtn.onclick = () => { interactionMode = "copyTarget"; renderGame(currentRoom); };
+        btns.appendChild(copyBtn);
+      }
+      if (selectedTile?.specialId === "exchange" && room.discard.length > 0) {
+        const exBtn = document.createElement("button");
+        exBtn.className = "btn btn-accent"; exBtn.textContent = "🔄 交換牌を使う";
+        exBtn.onclick = () => { interactionMode = "exchangeRiver"; renderGame(currentRoom); };
+        btns.appendChild(exBtn);
+      }
+      if (!isFinalTurn) {
+        const disBtn = document.createElement("button");
+        disBtn.className = "btn btn-primary"; disBtn.disabled = !selectedTile;
+        disBtn.textContent = selectedTile ? "選択した牌を捨てる" : "捨てる牌を選択してください";
+        disBtn.onclick = () => handleDiscardTile(selectedTile);
+        btns.appendChild(disBtn);
+      } else {
+        if (!room.finalSwapUsed[myUid] && room.discard.length > 0) {
+          const swapBtn = document.createElement("button");
+          swapBtn.className = "btn btn-accent"; swapBtn.disabled = !selectedTile;
+          swapBtn.textContent = selectedTile ? "✨ 選択牌と川を交換（最終1回）" : "交換する手牌を選択";
+          swapBtn.onclick = () => { interactionMode = "finalSwapRiver"; renderGame(currentRoom); };
+          btns.appendChild(swapBtn);
+        }
+        const endBtn = document.createElement("button");
+        endBtn.className = "btn btn-sub"; endBtn.textContent = "この12枚で終了（命名フェーズへ）";
+        endBtn.onclick = handleFinish20th;
+        btns.appendChild(endBtn);
+      }
+    }
+
+    async function handleHandTileClick(tile, room) {
+      if (interactionMode === "copyTarget") {
+        if (tile.uid === selectedUid || tile.kind === "special" || tile.kind === "dora") return;
+        await withLock(async () => {
+          const myHand = getOrderedHand(room.hands[myUid]);
+          const copyIdx = myHand.findIndex(t => t.uid === selectedUid);
+          if (copyIdx === -1) return;
+          myHand[copyIdx] = { ...tile, uid: myHand[copyIdx].uid, isCopied: true };
+          interactionMode = "normal"; selectedUid = null;
+          await updateRoom(currentRoomCode, { [`hands.${myUid}`]: myHand });
+        });
+        return;
+      }
+      if (!selectedUid) selectedUid = tile.uid;
+      else if (selectedUid === tile.uid) selectedUid = null;
+      else {
+        const idxA = localHandUids.indexOf(selectedUid), idxB = localHandUids.indexOf(tile.uid);
+        if (idxA !== -1 && idxB !== -1) [localHandUids[idxA], localHandUids[idxB]] = [localHandUids[idxB], localHandUids[idxA]];
+        selectedUid = null;
+      }
+      renderGame(currentRoom);
+    }
+
+    const handleDrawTile = () => withLock(async () => {
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        if (data.turnOrder[data.turnIndex] !== myUid || data.turnPhase !== "draw") return;
+        const state = {
+          deck: [...data.deck], discard: [...data.discard], excluded: [...data.excluded],
+          doras: { ...data.doras, [myUid]: [...(data.doras[myUid] || [])] }
+        };
+        const tile = drawNonDoraTile(state, myUid);
+        const hand = [...data.hands[myUid]];
+        if (tile) hand.push(tile);
+        tx.update(ref, {
+          deck: state.deck, discard: state.discard, excluded: state.excluded,
+          [`doras.${myUid}`]: state.doras[myUid], [`hands.${myUid}`]: hand,
+          [`drawCounts.${myUid}`]: (data.drawCounts[myUid] || 0) + 1, turnPhase: "action"
+        });
+      });
     });
-  });
-};
 
-$("btn-leave-room").onclick = () => {
-  if (!confirm("この部屋から退室しますか？")) return;
-  if (unsubRoom) unsubRoom();
-  unsubRoom = null;
-  currentRoomCode = null;
-  currentRoom = null;
-  localStorage.removeItem(LS_ROOM);
-  showScreen("lobby");
-};
+    const handleRiverClick = (riverIdx) => withLock(async () => {
+      const mode = interactionMode, selUid = selectedUid;
+      interactionMode = "normal"; selectedUid = null;
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const hand = getOrderedHand(data.hands[myUid]);
+        const handIdx = hand.findIndex(t => t.uid === selUid);
+        if (handIdx === -1 || riverIdx >= data.discard.length) return;
+        const discard = [...data.discard], excluded = [...data.excluded];
+        const targetFromRiver = discard.splice(riverIdx, 1)[0];
+        const givenTile = hand[handIdx];
+        hand[handIdx] = targetFromRiver;
+        if (mode === "exchangeRiver") {
+          excluded.push(givenTile);
+          tx.update(ref, { [`hands.${myUid}`]: hand, discard, excluded });
+        } else if (mode === "finalSwapRiver") {
+          discard.push(givenTile);
+          tx.update(ref, { [`hands.${myUid}`]: hand, discard, [`finalSwapUsed.${myUid}`]: true });
+        }
+      });
+    });
 
-$("btn-show-rules").onclick = () => $("modal-rules").classList.remove("hidden");
-$("btn-close-rules").onclick = () => $("modal-rules").classList.add("hidden");
+    const handleDiscardTile = (tile) => withLock(async () => {
+      selectedUid = null; interactionMode = "normal";
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const hand = getOrderedHand(data.hands[myUid]).filter(t => t.uid !== tile.uid);
+        const discard = [...data.discard, tile];
+        const { nextIndex, allDone } = advanceTurn(data);
+        tx.update(ref, {
+          [`hands.${myUid}`]: hand, discard,
+          turnIndex: nextIndex, turnPhase: "draw", phase: allDone ? "naming" : "playing"
+        });
+      });
+    });
+
+    const handleWin = (evalResult) => withLock(async () => {
+      selectedUid = null; interactionMode = "normal";
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const ordered = getOrderedHand(data.hands[myUid]);
+        const { nextIndex, allDone } = advanceTurn({ ...data, statuses: { ...data.statuses, [myUid]: "won" } });
+        tx.update(ref, {
+          [`hands.${myUid}`]: ordered, [`statuses.${myUid}`]: "won", [`winResults.${myUid}`]: evalResult,
+          turnIndex: nextIndex, turnPhase: "draw", phase: allDone ? "naming" : "playing"
+        });
+      });
+    });
+
+    const handleFinish20th = () => withLock(async () => {
+      selectedUid = null; interactionMode = "normal";
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const ordered = getOrderedHand(data.hands[myUid]);
+        const { nextIndex, allDone } = advanceTurn({ ...data, statuses: { ...data.statuses, [myUid]: "finished" } });
+        tx.update(ref, {
+          [`hands.${myUid}`]: ordered, [`statuses.${myUid}`]: "finished",
+          turnIndex: nextIndex, turnPhase: "draw", phase: allDone ? "naming" : "playing"
+        });
+      });
+    });
+
+    function renderVotePhase(room) {
+      showScreen("vote");
+      const isNaming = room.phase === "naming";
+      $("vote-phase-title").textContent = isNaming ? "🎨 自分の役に名前をつけよう！" : "🗳️ 一番いい役名・組み合わせに投票！";
+      $("vote-phase-desc").textContent = isNaming
+        ? "上がった人も上がれなかった人も、自分の12枚にステキな名前をつけてください。"
+        : "自分以外のプレイヤーから1人選んで投票してください（1票＝＋50点、ドラ倍率あり）。";
+
+      $("naming-input-box").classList.toggle("hidden", !isNaming || Boolean(room.names[myUid]));
+      const list = $("vote-cards-list");
+      list.innerHTML = "";
+      const alreadyVoted = Boolean(room.votes[myUid]);
+
+      for (const uid of room.turnOrder) {
+        const p = room.players[uid], hand = room.hands[uid] || [], win = room.winResults[uid];
+        const doraCount = (room.doras[uid] || []).length, roleName = room.names[uid] || "（名前を考え中…）";
+        const card = document.createElement("div");
+        card.className = "vote-card";
+        card.innerHTML = `
+          <div class="vote-card-head">
+            <div><strong>${p.name}</strong> ${uid === myUid ? "(あなた)" : ""}
+            <span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}｜ドラ${doraCount}枚</span></div>
+            <div class="vote-role-name">「${roleName}」</div>
+          </div>
+        `;
+        const row = document.createElement("div");
+        row.className = "vote-hand-row";
+        hand.forEach(t => row.appendChild(createTileEl(t, { mini: true })));
+        card.appendChild(row);
+
+        if (!isNaming && uid !== myUid) {
+          const btn = document.createElement("button");
+          btn.className = "btn btn-accent btn-sm";
+          btn.disabled = alreadyVoted;
+          btn.textContent = room.votes[myUid] === uid ? "✔ 投票済み" : alreadyVoted ? "投票完了" : "❤️ この役に投票する";
+          btn.onclick = () => handleVoteSubmit(uid);
+          card.appendChild(btn);
+        }
+        list.appendChild(card);
+      }
+    }
+
+    const handleVoteSubmit = (targetUid) => withLock(async () => {
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const votes = { ...data.votes, [myUid]: targetUid };
+        if (!data.turnOrder.every(uid => Boolean(votes[uid]))) {
+          tx.update(ref, { [`votes.${myUid}`]: targetUid }); return;
+        }
+        const voteCounts = {};
+        for (const uid of data.turnOrder) voteCounts[uid] = 0;
+        for (const v of Object.values(votes)) if (voteCounts[v] !== undefined) voteCounts[v]++;
+
+        const roundResults = [], playerPatches = {};
+        for (const uid of data.turnOrder) {
+          const base = data.winResults[uid]?.score || 0;
+          const vCount = voteCounts[uid], vScore = vCount * 50;
+          const mult = getDoraMultiplier((data.doras[uid] || []).length);
+          const roundTotal = Math.ceil((base + vScore) * mult);
+          const newTotal = data.players[uid].totalScore + roundTotal;
+          playerPatches[`players.${uid}.totalScore`] = newTotal;
+          roundResults.push({
+            uid, name: data.players[uid].name, roleName: data.names[uid] || "",
+            base, vCount, vScore, mult, roundTotal, newTotal
+          });
+        }
+        roundResults.sort((a, b) => b.newTotal - a.newTotal);
+        tx.update(ref, { [`votes.${myUid}`]: targetUid, ...playerPatches, roundResults, phase: "roundResult" });
+      });
+    });
+
+    function renderResult(room) {
+      showScreen("result");
+      const isFinal = room.round >= 4;
+      $("result-title").textContent = isFinal ? "🏆 最終結果（全4ラウンド終了）" : `📊 ラウンド ${room.round} 結果`;
+      const rows = (room.roundResults || []).map((r, i) => `
+        <tr>
+          <td>${i + 1}位</td>
+          <td><strong>${r.name}</strong><br><span class="small-note">「${r.roleName}」</span></td>
+          <td>${r.base} + ${r.vScore}(${r.vCount}票) × ${r.mult} = <strong>${r.roundTotal}点</strong></td>
+          <td><strong>${r.newTotal}点</strong></td>
+        </tr>
+      `).join("");
+      $("result-table-wrap").innerHTML = `
+        <table class="result-table">
+          <thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点</th><th>累計</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+      const area = $("result-next-area");
+      area.innerHTML = "";
+      if (room.hostUid === myUid) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-primary";
+        btn.textContent = isFinal ? "同じメンバーで最初から遊ぶ" : `次のラウンドへ（${room.round + 1}/4）`;
+        btn.onclick = () => withLock(async () => {
+          if (isFinal) {
+            const patches = {};
+            for (const uid of room.turnOrder) patches[`players.${uid}.totalScore`] = 0;
+            await updateRoom(currentRoomCode, { ...patches, ...buildRoundInitialState(room.turnOrder, 1) });
+          } else {
+            await updateRoom(currentRoomCode, buildRoundInitialState(room.turnOrder, room.round + 1));
+          }
+        });
+        area.appendChild(btn);
+      } else {
+        area.innerHTML = `<p class="small-note">ホストの操作をお待ちください…</p>`;
+      }
+    }
+
+    function enterRoom(code) {
+      currentRoomCode = code;
+      localStorage.setItem(LS_ROOM, code);
+      if (unsubRoom) unsubRoom();
+      unsubRoom = subscribeRoom(code, (room) => {
+        currentRoom = room;
+        if (room.phase === "waiting") renderWaiting(room);
+        else if (room.phase === "playing") renderGame(room);
+        else if (room.phase === "naming" || room.phase === "voting") renderVotePhase(room);
+        else if (room.phase === "roundResult") renderResult(room);
+      });
+    }
+
+    $("input-player-name").value = localStorage.getItem(LS_NAME) || "";
+    $("config-warning").classList.toggle("hidden", isFirebaseConfigured());
+
+    initFirebase(async (user) => {
+      if (!user) return;
+      myUid = user.uid;
+      const savedRoom = localStorage.getItem(LS_ROOM);
+      if (savedRoom) {
+        if (await checkRoomMembership(savedRoom, myUid)) { enterRoom(savedRoom); return; }
+        localStorage.removeItem(LS_ROOM);
+      }
+      showScreen("lobby");
+    });
+
+    $("btn-create-room").onclick = () => withLock(async () => {
+      const name = $("input-player-name").value.trim();
+      if (!name) return ($("lobby-error").textContent = "名前を入力してください。");
+      if (!myUid) return ($("lobby-error").textContent = "Firebase設定を確認してください。");
+      localStorage.setItem(LS_NAME, name);
+      $("lobby-error").textContent = "";
+      try { enterRoom(await createRoom(myUid, name)); } catch (e) { $("lobby-error").textContent = e.message; }
+    });
+
+    $("btn-join-room").onclick = () => withLock(async () => {
+      const name = $("input-player-name").value.trim(), code = $("input-room-code").value.trim();
+      if (!name) return ($("lobby-error").textContent = "名前を入力してください。");
+      if (!/^\d{4}$/.test(code)) return ($("lobby-error").textContent = "4桁の数字を入力してください。");
+      if (!myUid) return ($("lobby-error").textContent = "Firebase設定を確認してください。");
+      localStorage.setItem(LS_NAME, name);
+      $("lobby-error").textContent = "";
+      try { await joinRoom(code, myUid, name); enterRoom(code); } catch (e) { $("lobby-error").textContent = e.message; }
+    });
+
+    $("btn-copy-code").onclick = () => {
+      navigator.clipboard?.writeText(currentRoomCode);
+      alert(`部屋コード「${currentRoomCode}」をコピーしました！`);
+    };
+
+    $("btn-start-game").onclick = () => withLock(async () => {
+      if (currentRoom) await updateRoom(currentRoomCode, buildRoundInitialState(currentRoom.turnOrder, 1));
+    });
+
+    $("btn-submit-name").onclick = () => withLock(async () => {
+      const roleName = $("input-role-name").value.trim();
+      if (!roleName) return alert("役名を入力してください！");
+      $("input-role-name").value = "";
+      await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const names = { ...data.names, [myUid]: roleName };
+        const allNamed = data.turnOrder.every(uid => Boolean(names[uid]));
+        tx.update(ref, { [`names.${myUid}`]: roleName, phase: allNamed ? "voting" : "naming" });
+      });
+    });
+
+    $("btn-leave-room").onclick = () => {
+      if (!confirm("この部屋から退室しますか？")) return;
+      if (unsubRoom) unsubRoom();
+      unsubRoom = null; currentRoomCode = null; currentRoom = null;
+      localStorage.removeItem(LS_ROOM);
+      showScreen("lobby");
+    };
+
+    $("btn-show-rules").onclick = () => $("modal-rules").classList.remove("hidden");
+    $("btn-close-rules").onclick = () => $("modal-rules").classList.add("hidden");
+  </script>
+</body>
+</html>
