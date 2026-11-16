@@ -125,13 +125,20 @@
     .action-guide { font-weight: bold; color: var(--primary-dark); margin: 6px 0; font-size: 0.92rem; }
     .special-warn { background: #fff3bf; border: 1px solid #ffd43b; color: #8c6500; padding: 6px 10px; border-radius: 8px; font-size: 0.84rem; margin-bottom: 6px; font-weight: bold; }
     .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-    .naming-box { display: flex; gap: 8px; margin: 12px 0 18px; }
-    .naming-box input { flex: 1; }
+
+    .naming-box { display: flex; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
+    .naming-box input { flex: 1; min-width: 200px; }
+    .naming-done-box { background: #f3f7f0; border: 2px solid #9dc88d; border-radius: 12px; padding: 14px; text-align: center; margin: 12px 0; }
     .vote-cards-list { display: grid; gap: 14px; margin-top: 12px; }
     .vote-card { border: 2px solid var(--border); border-radius: 12px; padding: 12px; background: #fffcf9; }
     .vote-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-    .vote-role-name { font-size: 1.1rem; font-weight: bold; color: var(--primary-dark); }
-    .vote-hand-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .vote-role-name { font-size: 1.15rem; font-weight: bold; color: var(--primary-dark); }
+    .vote-hand-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+
+    .vote-result-box { background: #fff8eb; border: 2px solid #ffd43b; border-radius: 12px; padding: 14px; margin-bottom: 16px; }
+    .vote-result-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #ecd9c6; font-size: 0.95rem; }
+    .vote-result-row:last-child { border-bottom: none; }
+
     table.result-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
     table.result-table th, table.result-table td { border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: left; }
     .result-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
@@ -160,7 +167,7 @@
 
   <main id="app">
     <div id="boot-error-banner" class="alert-danger hidden">
-      ⚠️ プログラムが動いていません！<code>index.html</code> に貼り付けた <code>firebaseConfig</code> の書き方を確認してください。
+      ⚠️ プログラムの読み込みに失敗しました。再読み込みをお試しください。
     </div>
 
     <!-- 1. ロビー画面 -->
@@ -168,9 +175,7 @@
       <div class="card hero-card">
         <h1>🐱 にゃんジャラ</h1>
         <p class="subtitle">猫と小物を集めて、自分だけの役名をつけよう！（2〜6人対戦）</p>
-        <div id="config-warning" class="alert hidden">
-          ⚠️ まだ <code>index.html</code> の <code>firebaseConfig</code> にFirebaseの設定が入っていません。
-        </div>
+        <div id="config-warning" class="alert hidden">⚠️ Firebaseの設定が入っていません。</div>
         <div id="invite-notice" class="alert-info hidden">
           📩 招待URLからアクセスしました！名前を入力して「部屋に入る」を押してください。
         </div>
@@ -250,7 +255,6 @@
           </div>
         </div>
 
-        <!-- 右側（スマホは下部）：上がれる役一覧パネル -->
         <aside class="role-sidebar card-compact">
           <h3>📜 上がれる役一覧（12枚）</h3>
           <div class="role-item">
@@ -281,23 +285,58 @@
       </div>
     </section>
 
-    <!-- 4. 命名・投票フェーズ画面 -->
+    <!-- 4. 命名フェーズ画面（自分の手牌のみ・他人は完全非表示・並び替え可） -->
+    <section id="screen-naming" class="screen hidden">
+      <div class="card">
+        <h2>🎨 自分の役に名前をつけよう！</h2>
+        <p class="small-note">
+          他のプレイヤーの手牌や結果は発表まで秘密です。<br>
+          <b>牌をタップして自由な発表順に並び替えてから</b>、ステキな役名をつけてください！
+        </p>
+        <div id="naming-my-status" class="alert-info" style="margin-top:10px;"></div>
+
+        <div class="card-compact" style="background:#fffcf8;">
+          <div class="area-title">
+            あなたの12枚 <span class="small-note" id="naming-sort-hint">（※2枚の牌を順番にタップすると位置を入れ替えられます）</span>
+          </div>
+          <div id="naming-hand-tiles" class="hand-tiles"></div>
+        </div>
+
+        <div id="naming-input-box" class="naming-box">
+          <input id="input-role-name" type="text" maxlength="20" placeholder="例：雪見こたつ猫セット" />
+          <button id="btn-submit-name" class="btn btn-primary">この順番・役名で決定！</button>
+        </div>
+
+        <div id="naming-done-box" class="naming-done-box hidden">
+          <div style="font-size:1.1rem; font-weight:bold; margin-bottom:4px;">
+            決定した役名：「<span id="naming-submitted-text"></span>」
+          </div>
+          <div class="small-note">他のプレイヤーが考え終わるまでお待ちください…</div>
+        </div>
+
+        <p id="naming-progress" class="small-note" style="text-align:center; font-weight:bold; margin-top:10px;"></p>
+      </div>
+    </section>
+
+    <!-- 5. 役名発表 ▶ 投票フェーズ画面 -->
     <section id="screen-vote" class="screen hidden">
       <div class="card">
-        <h2 id="vote-phase-title">役名をつけよう！</h2>
+        <h2 id="vote-phase-title">🎉 役名発表！</h2>
         <p id="vote-phase-desc" class="small-note"></p>
-        <div id="naming-input-box" class="naming-box hidden">
-          <input id="input-role-name" type="text" maxlength="20" placeholder="例：雪見こたつ猫セット" />
-          <button id="btn-submit-name" class="btn btn-primary">役名を決定！</button>
+        <div id="reveal-host-bar" class="hidden" style="margin:12px 0;">
+          <button id="btn-start-voting" class="btn btn-primary btn-lg btn-block">🗳️ みんな見終わったら投票へ進む！</button>
         </div>
+        <p id="vote-progress" class="small-note" style="font-weight:bold;"></p>
         <div id="vote-cards-list" class="vote-cards-list"></div>
       </div>
     </section>
 
-    <!-- 5. 結果画面 -->
+    <!-- 6. 投票結果発表 ＆ ラウンド結果画面 -->
     <section id="screen-result" class="screen hidden">
       <div class="card">
-        <h2 id="result-title">ラウンド結果</h2>
+        <h2 id="result-title">🏆 投票結果＆ラウンド結果</h2>
+        <div id="vote-result-wrap"></div>
+        <h3 style="margin-bottom:6px;">📊 得点・総合ランキング</h3>
         <div id="result-table-wrap"></div>
         <div id="result-next-area" class="result-actions"></div>
       </div>
@@ -319,9 +358,9 @@
             <li><b>1×12 オール猫（60点）</b>：すべて猫牌（猫種被りあり）。</li>
           </ul>
         </li>
-        <li><strong>特別牌</strong>：コピー牌（手牌1枚に変身）／交換牌（川の1枚と交換）／オールマイティー（好きな牌に変身）／ドラ牌（追加ツモ＋得点倍率 ×1.5 / ×2 / ×3）。※コピー・交換・オールマイティーは手牌に未処理のまま残っていると上がれません。</li>
+        <li><strong>特別牌</strong>：コピー牌／交換牌／オールマイティーは手牌に未処理のまま残っていると上がれません。ドラ牌は追加ツモ＋得点倍率（×1.5 / ×2 / ×3）。</li>
         <li><strong>最終特別ルール</strong>：20巡目に役ができなかった場合、1回だけ川の牌と手牌1枚を入れ替えられます。</li>
-        <li><strong>投票フェーズ</strong>：誰かが上がっても残りの人は20巡目まで続行し、最後に<b>全員</b>が役名をつけて投票（1票＋50点、ドラ倍率有効）！</li>
+        <li><strong>発表＆投票</strong>：全員秘密で役名と並び順を決め、役名発表 ▶ 投票（1票＋50点、ドラ有効） ▶ 投票結果発表 の順で競います！</li>
       </ul>
     </div>
   </div>
@@ -332,14 +371,12 @@
       <button id="btn-close-wild" class="modal-close">×</button>
       <h3>🌈 オールマイティーを変身させる</h3>
       <p class="small-note">どの牌に変身させますか？</p>
-
       <div class="wild-section-title">猫牌に変える</div>
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <select id="wild-cat-select"></select>
         <select id="wild-expr-select"></select>
       </div>
       <button id="btn-confirm-wild-cat" class="btn btn-primary btn-block">この猫牌に変身する</button>
-
       <div class="wild-section-title">小物牌に変える（タップで決定）</div>
       <div id="wild-item-grid" class="wild-grid"></div>
     </div>
@@ -361,22 +398,19 @@
       getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, runTransaction
     } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
-    // =========================================================
-    // ★ここだけ書き換え★ Firebaseの設定を貼り付けてください
-    // =========================================================
     const firebaseConfig = {
-  apiKey: "AIzaSyBT7pwAqrjB9qRZ32ziWexVJI0bysQgXeM",
-  authDomain: "nyanzyara.firebaseapp.com",
-  projectId: "nyanzyara",
-  storageBucket: "nyanzyara.firebasestorage.app",
-  messagingSenderId: "313025754659",
-  appId: "1:313025754659:web:997424c458922d54952396"
-};
+      apiKey: "AIzaSyBT7pwAqrjB9qRZ32ziWexVJI0bysQgXeM",
+      authDomain: "nyanzyara.firebaseapp.com",
+      projectId: "nyanzyara",
+      storageBucket: "nyanzyara.firebasestorage.app",
+      messagingSenderId: "313025754659",
+      appId: "1:313025754659:web:997424c458922d54952396"
+    };
+
     const $ = (id) => document.getElementById(id);
     function showLobbyError(msg) { $("lobby-error").textContent = msg; }
     function isFirebaseConfigured() { return firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_"); }
 
-    // 猫1〜10の10種類
     const CAT_TYPES = [
       { id: "kuro", name: "黒猫", emoji: "🐈‍⬛" }, { id: "shiro", name: "白猫", emoji: "🐱" },
       { id: "chatora", name: "茶トラ", emoji: "🐯" }, { id: "kijitora", name: "キジトラ", emoji: "🦊" },
@@ -414,13 +448,11 @@
       return a;
     }
 
-    // Ver.6山札生成：猫10種×4表情×各3枚(120枚) ＋ 小物(2-3人:5種, 4人:8種, 5-6人:12種)×各5枚 ＋ 特別4種×3枚(12枚)
     function createDeckForPlayers(playerCount) {
       const catSets = 3;
       const itemKindCount = playerCount <= 3 ? 5 : playerCount === 4 ? 8 : 12;
       let seq = 1;
       const deck = [];
-
       for (let s = 0; s < catSets; s++) {
         for (const cat of CAT_TYPES) {
           for (const expr of EXPRESSIONS) {
@@ -440,8 +472,7 @@
       for (const sp of SPECIAL_TYPES) {
         for (let c = 0; c < 3; c++) {
           deck.push({
-            uid: `t_${seq++}`,
-            kind: sp.id === "dora" ? "dora" : "special",
+            uid: `t_${seq++}`, kind: sp.id === "dora" ? "dora" : "special",
             specialId: sp.id, tileId: `sp_${sp.id}`,
             specialName: sp.name, specialEmoji: sp.emoji, specialSub: sp.sub
           });
@@ -450,13 +481,11 @@
       return shuffle(deck);
     }
 
-    // 未処理の特別牌チェック（ドラ牌は手牌に入らないが念のため除外判定に含む）
     function isUnconvertedSpecial(t) {
       return t.kind === "special" || t.kind === "almighty" || t.kind === "dora" ||
         t.specialId === "copy" || t.specialId === "exchange" || t.specialId === "almighty";
     }
 
-    // 役判定（未変換の特別牌が残っていたら絶対に上がれない）
     function isValidGroup(group) {
       if (group.some(isUnconvertedSpecial)) return false;
       if (group.every(t => t.tileId === group[0].tileId)) return true;
@@ -508,24 +537,13 @@
     function evaluateHand(tiles) {
       if (!tiles || tiles.length !== 12) return null;
       if (tiles.some(isUnconvertedSpecial)) return null;
-
       const cands = [];
-      const cats = tiles.filter(t => t.kind === "cat");
-      const items = tiles.filter(t => t.kind === "item");
-      const uCat = new Set(cats.map(t => t.catType));
-      const uItem = new Set(items.map(t => t.tileId));
-
-      // 1×12 オール別猫＋別小物（200点）
-      if (uCat.size === cats.length && uItem.size === items.length) {
-        cands.push({ score: 200, label: "1×12 オール別猫＋別小物" });
-      }
-      // 3×4（100点）
+      const cats = tiles.filter(t => t.kind === "cat"), items = tiles.filter(t => t.kind === "item");
+      const uCat = new Set(cats.map(t => t.catType)), uItem = new Set(items.map(t => t.tileId));
+      if (uCat.size === cats.length && uItem.size === items.length) cands.push({ score: 200, label: "1×12 オール別猫＋別小物" });
       if (canForm3x4(tiles)) cands.push({ score: 100, label: "3×4 完成" });
-      // 2×6（100点）
       if (canForm2x6(tiles)) cands.push({ score: 100, label: "2×6 完成" });
-      // 1×12 オール猫（60点）
       if (cats.length === 12) cands.push({ score: 60, label: "1×12 オール猫" });
-
       if (cands.length === 0) return null;
       cands.sort((a, b) => b.score - a.score);
       return cands[0];
@@ -533,14 +551,11 @@
 
     function getDoraMultiplier(n) { return n >= 3 ? 3 : n === 2 ? 2 : n === 1 ? 1.5 : 1; }
 
-    // Firebase接続
     let app = null, auth = null, db = null;
     function initFirebase(onUserReady) {
       if (!isFirebaseConfigured()) { onUserReady(null); return; }
       try {
-        app = initializeApp(firebaseConfig);
-        auth = getAuth(app);
-        db = getFirestore(app);
+        app = initializeApp(firebaseConfig); auth = getAuth(app); db = getFirestore(app);
         onAuthStateChanged(auth, async (user) => {
           if (user) onUserReady(user);
           else {
@@ -548,9 +563,7 @@
             catch (e) { showLobbyError(`ログインエラー(${e.code || e.message}): Firebaseの「Authentication ＞ 匿名ログイン」が有効か確認してください。`); }
           }
         });
-      } catch (e) {
-        showLobbyError(`Firebase初期化エラー: ${e.message}`);
-      }
+      } catch (e) { showLobbyError(`Firebase初期化エラー: ${e.message}`); }
     }
 
     function getRoomRef(code) { return doc(db, "rooms", code); }
@@ -606,13 +619,13 @@
       });
     }
 
-    // ゲーム状態管理
     const LS_ROOM = "nyanjara_room_code", LS_NAME = "nyanjara_player_name";
     let myUid = null, currentRoomCode = null, currentRoom = null, unsubRoom = null;
     let localHandUids = [], selectedUid = null, interactionMode = "normal";
+    let namingSelectedUid = null, lastNamingRenderKey = "";
 
     function showScreen(name) {
-      for (const s of ["lobby", "waiting", "game", "vote", "result"]) {
+      for (const s of ["lobby", "waiting", "game", "naming", "vote", "result"]) {
         $(`screen-${s}`).classList.toggle("hidden", s !== name);
       }
       const inRoom = name !== "lobby";
@@ -707,6 +720,7 @@
     }
 
     function renderGame(room) {
+      lastNamingRenderKey = "";
       showScreen("game");
       $("game-round").textContent = room.round;
       $("game-deck-count").textContent = room.deck.length;
@@ -926,22 +940,96 @@
       });
     }
 
-    function renderVotePhase(room) {
+    // 4. 命名フェーズ描画（自分の手牌のみ表示・他人の結果や牌は一切見せない・並び替え可）
+    function renderNamingTiles(room, alreadyNamed) {
+      const myHand = getOrderedHand(room.hands[myUid] || []);
+      const el = $("naming-hand-tiles");
+      el.innerHTML = "";
+      myHand.forEach(tile => {
+        const card = createTileEl(tile, { selected: !alreadyNamed && tile.uid === namingSelectedUid });
+        if (!alreadyNamed) {
+          card.onclick = () => {
+            if (!namingSelectedUid) namingSelectedUid = tile.uid;
+            else if (namingSelectedUid === tile.uid) namingSelectedUid = null;
+            else {
+              const a = localHandUids.indexOf(namingSelectedUid), b = localHandUids.indexOf(tile.uid);
+              if (a !== -1 && b !== -1) [localHandUids[a], localHandUids[b]] = [localHandUids[b], localHandUids[a]];
+              namingSelectedUid = null;
+            }
+            renderNamingTiles(currentRoom, false);
+          };
+        }
+        el.appendChild(card);
+      });
+    }
+
+    function renderNamingPhase(room) {
+      showScreen("naming");
+      const myWin = room.winResults[myUid];
+      const myDoraCount = (room.doras[myUid] || []).length;
+      const mySubmittedName = room.names[myUid];
+      const alreadyNamed = Boolean(mySubmittedName);
+
+      $("naming-my-status").textContent =
+        `あなたの状態：${myWin ? `🎉 上がり達成！（${myWin.label}：${myWin.score}点）` : "流局（0点・芸術点勝負！）"} ｜ 所持ドラ：${myDoraCount}枚`;
+
+      $("naming-input-box").classList.toggle("hidden", alreadyNamed);
+      $("naming-done-box").classList.toggle("hidden", !alreadyNamed);
+      $("naming-sort-hint").classList.toggle("hidden", alreadyNamed);
+      if (alreadyNamed) $("naming-submitted-text").textContent = mySubmittedName;
+
+      const doneCount = room.turnOrder.filter(uid => Boolean(room.names[uid])).length;
+      $("naming-progress").textContent = `役名の入力状況：${doneCount} / ${room.turnOrder.length} 人 完了（全員終わると発表へ進みます）`;
+
+      // 他人が送信した時に手牌や入力中の文字がリセットされないようキーで制御
+      const renderKey = `${room.round}_${alreadyNamed}`;
+      if (lastNamingRenderKey !== renderKey) {
+        lastNamingRenderKey = renderKey;
+        namingSelectedUid = null;
+        renderNamingTiles(room, alreadyNamed);
+      }
+    }
+
+    // 5. 役名発表 ▶ 投票フェーズ描画
+    function renderRevealOrVotePhase(room) {
+      lastNamingRenderKey = "";
       showScreen("vote");
-      const isNaming = room.phase === "naming";
-      $("vote-phase-title").textContent = isNaming ? "🎨 自分の役に名前をつけよう！" : "🗳️ 一番いい役名・組み合わせに投票！";
-      $("vote-phase-desc").textContent = isNaming ? "上がった人も上がれなかった人も、自分の12枚にステキな名前をつけてください。" : "自分以外のプレイヤーから1人選んで投票してください（1票＝＋50点、ドラ倍率あり）。";
-      $("naming-input-box").classList.toggle("hidden", !isNaming || Boolean(room.names[myUid]));
+      const isReveal = room.phase === "reveal";
+      const isHost = room.hostUid === myUid;
+
+      $("vote-phase-title").textContent = isReveal ? "🎉 役名発表！" : "🗳️ 投票タイム！";
+      $("vote-phase-desc").textContent = isReveal
+        ? "みんなの並べた牌と役名が公開されました！確認し終わったら投票へ進みましょう。"
+        : "自分以外のプレイヤーから一番ステキな役（名前と組み合わせ）を1つ選んで投票してください（1票＝＋50点、ドラ倍率あり）。";
+
+      $("reveal-host-bar").classList.toggle("hidden", !isReveal || !isHost);
+      if (isReveal && !isHost) {
+        $("vote-progress").textContent = "みんなの作品を確認中…ホストが投票を開始するまでお待ちください。";
+      } else if (!isReveal) {
+        const votedCount = room.turnOrder.filter(uid => Boolean(room.votes[uid])).length;
+        $("vote-progress").textContent = `投票状況：${votedCount} / ${room.turnOrder.length} 人 完了`;
+      } else {
+        $("vote-progress").textContent = "";
+      }
+
       const list = $("vote-cards-list"); list.innerHTML = "";
       const alreadyVoted = Boolean(room.votes[myUid]);
       for (const uid of room.turnOrder) {
         const p = room.players[uid], hand = room.hands[uid] || [], win = room.winResults[uid], doraCount = (room.doras[uid] || []).length;
         const card = document.createElement("div"); card.className = "vote-card";
-        card.innerHTML = `<div class="vote-card-head"><div><strong>${p.name}</strong> ${uid === myUid ? "(あなた)" : ""}<span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}｜ドラ${doraCount}枚</span></div><div class="vote-role-name">「${room.names[uid] || "（名前を考え中…）"}」</div></div>`;
+        card.innerHTML = `
+          <div class="vote-card-head">
+            <div><strong>${p.name}</strong> ${uid === myUid ? "(あなた)" : ""}
+              <span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}｜ドラ${doraCount}枚</span>
+            </div>
+            <div class="vote-role-name">「${room.names[uid] || ""}」</div>
+          </div>
+        `;
         const row = document.createElement("div"); row.className = "vote-hand-row";
         hand.forEach(t => row.appendChild(createTileEl(t, { mini: true })));
         card.appendChild(row);
-        if (!isNaming && uid !== myUid) {
+
+        if (!isReveal && uid !== myUid) {
           const btn = document.createElement("button");
           btn.className = "btn btn-accent btn-sm"; btn.disabled = alreadyVoted;
           btn.textContent = room.votes[myUid] === uid ? "✔ 投票済み" : alreadyVoted ? "投票完了" : "❤️ この役に投票する";
@@ -972,12 +1060,42 @@
       });
     }
 
+    // 6. 投票結果発表 ＆ ラウンド結果画面
     function renderResult(room) {
+      lastNamingRenderKey = "";
       showScreen("result");
       const isFinal = room.round >= 4;
-      $("result-title").textContent = isFinal ? "🏆 最終結果（全4ラウンド終了）" : `📊 ラウンド ${room.round} 結果`;
-      const rows = (room.roundResults || []).map((r, i) => `<tr><td>${i + 1}位</td><td><strong>${r.name}</strong><br><span class="small-note">「${r.roleName}」</span></td><td>${r.base} + ${r.vScore}(${r.vCount}票) × ${r.mult} = <strong>${r.roundTotal}点</strong></td><td><strong>${r.newTotal}点</strong></td></tr>`).join("");
-      $("result-table-wrap").innerHTML = `<table class="result-table"><thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点</th><th>累計</th></tr></thead><tbody>${rows}</tbody></table>`;
+      $("result-title").textContent = isFinal ? "🏆 投票結果 ＆ 最終ランキング（全4ラウンド終了）" : `🗳️ 投票結果 ＆ ラウンド ${room.round} 結果`;
+
+      const list = room.roundResults || [];
+      const maxVote = Math.max(0, ...list.map(r => r.vCount));
+      const voteSorted = [...list].sort((a, b) => b.vCount - a.vCount);
+
+      $("vote-result-wrap").innerHTML = `
+        <div class="vote-result-box">
+          <div style="font-weight:bold; margin-bottom:8px;">🗳️ 投票結果（芸術点：1票＝＋50点）</div>
+          ${voteSorted.map(r => `
+            <div class="vote-result-row">
+              <div>
+                ${maxVote > 0 && r.vCount === maxVote ? "👑 " : ""}
+                <strong>${r.name}</strong>「${r.roleName}」
+              </div>
+              <div><strong>${r.vCount}票</strong>（＋${r.vScore}点）</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+
+      const rows = list.map((r, i) => `
+        <tr>
+          <td>${i + 1}位</td>
+          <td><strong>${r.name}</strong><br><span class="small-note">「${r.roleName}」</span></td>
+          <td>(${r.base} + ${r.vScore}) × ${r.mult} = <strong>${r.roundTotal}点</strong></td>
+          <td><strong>${r.newTotal}点</strong></td>
+        </tr>
+      `).join("");
+      $("result-table-wrap").innerHTML = `<table class="result-table"><thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点 (役+投票)×ドラ</th><th>累計</th></tr></thead><tbody>${rows}</tbody></table>`;
+
       const area = $("result-next-area"); area.innerHTML = "";
       if (room.hostUid === myUid) {
         const btn = document.createElement("button");
@@ -1006,12 +1124,12 @@
         currentRoom = room;
         if (room.phase === "waiting") renderWaiting(room);
         else if (room.phase === "playing") renderGame(room);
-        else if (room.phase === "naming" || room.phase === "voting") renderVotePhase(room);
+        else if (room.phase === "naming") renderNamingPhase(room);
+        else if (room.phase === "reveal" || room.phase === "voting") renderRevealOrVotePhase(room);
         else if (room.phase === "roundResult") renderResult(room);
       });
     }
 
-    // オールマイティー選択モーダル初期化
     function initWildModal() {
       const catSel = $("wild-cat-select"), exprSel = $("wild-expr-select"), itemGrid = $("wild-item-grid");
       catSel.innerHTML = CAT_TYPES.map(c => `<option value="${c.id}">${c.emoji} ${c.name}</option>`).join("");
@@ -1036,7 +1154,6 @@
       $("btn-close-wild").onclick = () => $("modal-wild").classList.add("hidden");
     }
 
-    // URLパラメータ（招待URL）読み取り
     const urlParams = new URLSearchParams(window.location.search);
     const inviteCode = urlParams.get("room");
     if (inviteCode && /^\d{4}$/.test(inviteCode)) {
@@ -1044,14 +1161,13 @@
       $("invite-notice").classList.remove("hidden");
     }
 
-    // 起動＆自動復帰
     window.__nyanjaraBooted = true;
     initWildModal();
     $("input-player-name").value = localStorage.getItem(LS_NAME) || "";
     $("config-warning").classList.toggle("hidden", isFirebaseConfigured());
 
     async function tryAutoReconnect() {
-      if (!myUid) return;
+      if (!myUid) return false;
       const savedRoom = localStorage.getItem(LS_ROOM);
       if (savedRoom) {
         try {
@@ -1068,7 +1184,6 @@
       if (!(await tryAutoReconnect())) showScreen("lobby");
     });
 
-    // 別ページ・バックグラウンドから戻ってきた時に再接続して最新同期
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && myUid) {
         if (currentRoomCode) enterRoom(currentRoomCode);
@@ -1080,7 +1195,7 @@
     });
 
     $("btn-create-room").onclick = async () => {
-      if (!isFirebaseConfigured()) return showLobbyError("index.html の firebaseConfig にFirebaseのキーを貼ってください。");
+      if (!isFirebaseConfigured()) return showLobbyError("Firebaseの設定が入っていません。");
       if (!myUid) return showLobbyError("Firebaseへ接続中です（または匿名ログインがオフです）。");
       const name = $("input-player-name").value.trim();
       if (!name) return showLobbyError("名前を入力してください。");
@@ -1093,7 +1208,7 @@
     };
 
     $("btn-join-room").onclick = async () => {
-      if (!isFirebaseConfigured()) return showLobbyError("index.html の firebaseConfig にFirebaseのキーを貼ってください。");
+      if (!isFirebaseConfigured()) return showLobbyError("Firebaseの設定が入っていません。");
       if (!myUid) return showLobbyError("Firebaseへ接続中です（または匿名ログインがオフです）。");
       const name = $("input-player-name").value.trim();
       const code = $("input-room-code").value.trim();
@@ -1119,15 +1234,30 @@
     $("btn-start-game").onclick = async () => {
       if (currentRoom) await updateRoom(currentRoomCode, buildRoundInitialState(currentRoom.turnOrder, 1));
     };
+
+    // 役名決定時：並び替えた自分の手牌順序も一緒に確定保存する
     $("btn-submit-name").onclick = async () => {
       const roleName = $("input-role-name").value.trim();
       if (!roleName) return alert("役名を入力してください！");
       $("input-role-name").value = "";
       await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        const orderedHand = getOrderedHand(data.hands[myUid] || []);
         const names = { ...data.names, [myUid]: roleName };
-        tx.update(ref, { [`names.${myUid}`]: roleName, phase: data.turnOrder.every(uid => Boolean(names[uid])) ? "voting" : "naming" });
+        const allNamed = data.turnOrder.every(uid => Boolean(names[uid]));
+        tx.update(ref, {
+          [`hands.${myUid}`]: orderedHand,
+          [`names.${myUid}`]: roleName,
+          phase: allNamed ? "reveal" : "naming"
+        });
       });
     };
+
+    $("btn-start-voting").onclick = async () => {
+      if (currentRoom && currentRoom.hostUid === myUid) {
+        await updateRoom(currentRoomCode, { phase: "voting" });
+      }
+    };
+
     $("btn-leave-room").onclick = () => {
       if (!confirm("この部屋から退室しますか？")) return;
       if (unsubRoom) unsubRoom();
