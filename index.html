@@ -23,7 +23,7 @@
     }
     .brand { font-weight: bold; font-size: 1.15rem; }
     .header-actions { display: flex; gap: 8px; align-items: center; }
-    main { max-width: 1120px; margin: 16px auto; padding: 0 12px; }
+    main { max-width: 1180px; margin: 16px auto; padding: 0 12px; }
     .card {
       background: var(--card); border: 2px solid var(--border); border-radius: 16px;
       padding: 20px; box-shadow: 0 4px 12px rgba(61,49,42,0.06);
@@ -63,6 +63,10 @@
     }
     @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03); } }
     .badge { background: #ffe8d6; padding: 4px 10px; border-radius: 99px; font-weight: bold; font-size: 0.85rem; }
+    .item-chip {
+      display: inline-block; background: #e6fcf5; border: 1px solid #96f2d7;
+      border-radius: 99px; padding: 2px 8px; font-size: 0.78rem; font-weight: bold; margin: 2px;
+    }
     .alert { background: #fff3cd; border: 1px solid #ffe69c; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; }
     .alert-info { background: #e7f5ff; border: 1px solid #a5d8ff; color: #1864ab; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; font-weight: bold; }
     .alert-danger { background: #ffe3e3; border: 1px solid #ffa8a8; color: #c92a2a; padding: 10px; border-radius: 8px; margin-bottom: 14px; font-size: 0.9rem; font-weight: bold; }
@@ -74,12 +78,13 @@
 
     /* ゲーム画面：PCは右側役一覧、スマホは下表示 */
     .game-layout { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
-    @media (min-width: 840px) {
-      .game-layout { grid-template-columns: 1fr 280px; }
+    .game-main-col { min-width: 0; }
+    @media (min-width: 900px) {
+      .game-layout { grid-template-columns: 1fr 290px; }
       .role-sidebar { position: sticky; top: 68px; }
     }
-    .role-sidebar h3 { margin: 0 0 8px; font-size: 1rem; border-bottom: 2px solid var(--border); padding-bottom: 6px; }
-    .role-item { background: #fffaf4; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-size: 0.84rem; }
+    .role-sidebar h3 { margin: 0 0 8px; font-size: 0.98rem; border-bottom: 2px solid var(--border); padding-bottom: 6px; }
+    .role-item { background: #fffaf4; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-size: 0.82rem; }
     .role-item-head { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 3px; }
     .role-pts { color: var(--primary-dark); }
 
@@ -92,9 +97,20 @@
     .p-chip.done { background: #f3f7f0; border-color: #9dc88d; }
     .area-title { font-weight: bold; font-size: 0.9rem; margin-bottom: 6px; }
     .river-tiles { display: flex; flex-wrap: wrap; gap: 6px; min-height: 54px; max-height: 165px; overflow-y: auto; }
-    .hand-tiles { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+
+    /* ★牌の1列表示（PCは1列収まり・スマホは横スクロール1列） */
+    .hand-tiles, .vote-hand-row {
+      display: flex; flex-wrap: nowrap; gap: 6px;
+      overflow-x: auto; justify-content: flex-start;
+      padding: 10px 4px 8px; -webkit-overflow-scrolling: touch;
+    }
+    @media (min-width: 920px) {
+      .hand-tiles { justify-content: center; }
+    }
+
     .tile {
-      width: 68px; min-height: 86px; border: 2px solid #d9c3ae; border-radius: 10px;
+      flex: 0 0 auto;
+      width: 66px; min-height: 86px; border: 2px solid #d9c3ae; border-radius: 10px;
       background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
       padding: 4px 3px; cursor: pointer; user-select: none; position: relative; transition: transform 0.12s; text-align: center;
     }
@@ -130,16 +146,15 @@
     .naming-box input { flex: 1; min-width: 200px; }
     .naming-done-box { background: #f3f7f0; border: 2px solid #9dc88d; border-radius: 12px; padding: 14px; text-align: center; margin: 12px 0; }
     .vote-cards-list { display: grid; gap: 14px; margin-top: 12px; }
-    .vote-card { border: 2px solid var(--border); border-radius: 12px; padding: 12px; background: #fffcf9; }
-    .vote-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .vote-card { border: 2px solid var(--border); border-radius: 12px; padding: 12px; background: #fffcf9; min-width: 0; }
+    .vote-card-head { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
     .vote-role-name { font-size: 1.15rem; font-weight: bold; color: var(--primary-dark); }
-    .vote-hand-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
 
     .vote-result-box { background: #fff8eb; border: 2px solid #ffd43b; border-radius: 12px; padding: 14px; margin-bottom: 16px; }
     .vote-result-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #ecd9c6; font-size: 0.95rem; }
     .vote-result-row:last-child { border-bottom: none; }
 
-    table.result-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+    table.result-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.88rem; }
     table.result-table th, table.result-table td { border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: left; }
     .result-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
     .modal {
@@ -249,43 +264,51 @@
           <div class="card-compact hand-area">
             <div class="area-title">
               あなたの手牌（<span id="my-hand-count">0</span>枚）
-              <span class="small-note">※タップで選択／別牌タップで並び替え</span>
+              <span class="small-note">※横にスクロール可／タップで選択・並び替え</span>
             </div>
             <div id="my-hand-tiles" class="hand-tiles"></div>
           </div>
         </div>
 
+        <!-- 右側（スマホは下部）：今回登場の小物 ＋ 役一覧パネル -->
         <aside class="role-sidebar card-compact">
+          <h3>🎁 今回の登場小物（8種×各6枚）</h3>
+          <div id="sidebar-round-items" style="margin-bottom:10px;"></div>
+
           <h3>📜 上がれる役一覧（12枚）</h3>
           <div class="role-item">
             <div class="role-item-head"><span>1×12 オール別猫＋別小物</span><span class="role-pts">200点</span></div>
-            <div class="small-note">10種の猫と小物から被りなしで12枚揃える（猫種も小物も一切重複なし）。</div>
+            <div class="small-note">猫種も小物も一切被らない12枚。</div>
           </div>
           <div class="role-item">
-            <div class="role-item-head"><span>3×4（3枚 × 4組）</span><span class="role-pts">100点</span></div>
-            <div class="small-note">各組が「同じ牌」「同じ猫種」「同じ表情」のいずれかで揃う。</div>
-          </div>
-          <div class="role-item">
-            <div class="role-item-head"><span>2×6（2枚 × 6組）</span><span class="role-pts">100点</span></div>
-            <div class="small-note">2枚ペアを6組つくる（同じ牌／同じ猫種／同じ表情）。</div>
+            <div class="role-item-head"><span>3×4 ／ 2×6 完成</span><span class="role-pts">100点</span></div>
+            <div class="small-note">各組を「同じ猫種」または「同じ小物」で揃える。（※同じ表情だけでは揃いません）</div>
           </div>
           <div class="role-item">
             <div class="role-item-head"><span>1×12 オール猫</span><span class="role-pts">60点</span></div>
-            <div class="small-note">12枚すべて猫牌で揃える（猫種被りOK）。</div>
+            <div class="small-note">12枚すべて猫牌（猫種被りOK）。</div>
+          </div>
+
+          <h3>🌟 追加ボーナス（ドラ有効）</h3>
+          <div class="role-item">
+            <div class="small-note">
+              • <b>一盃口 / 二盃口</b>：同じ内容の組が2つ(＋30) / 2ペア(＋80)<br>
+              • <b>表情おそろい</b>：色違いで同じ表情の猫組が2(＋30)/3(＋60)/4(＋100)<br>
+              • <b>完全同顔セット</b>：表情まで同じ猫組1つにつき ＋30<br>
+              • <b>猫まみれ / 小物まみれ</b>：全猫or全小物で3×4・2×6完成(＋50)<br>
+              • <b>4表情コンプ</b>：1猫種の4表情全揃い(＋40)<br>
+              • <b>小物6枚独占</b>：同じ小物を6枚集める(＋60)
+            </div>
           </div>
           <div class="role-item">
-            <div class="role-item-head"><span>✨ 特別牌と投票ボーナス</span></div>
-            <div class="small-note">
-              • <b>コピー/交換/オールマイティー</b>：変身・交換してから上がり可<br>
-              • <b>ドラ牌</b>：1枚×1.5 / 2枚×2 / 3枚×3<br>
-              • <b>投票</b>：全員命名＆1票＋50点（ドラ有効）
-            </div>
+            <div class="role-item-head"><span>⚡ 早上がりボーナス（ドラなし）</span></div>
+            <div class="small-note">1番 ＋50 ／ 2番 ＋30 ／ 3番 ＋10 ／ 4番以降 0</div>
           </div>
         </aside>
       </div>
     </section>
 
-    <!-- 4. 命名フェーズ画面（自分の手牌のみ・他人は完全非表示・並び替え可） -->
+    <!-- 4. 命名フェーズ画面 -->
     <section id="screen-naming" class="screen hidden">
       <div class="card">
         <h2>🎨 自分の役に名前をつけよう！</h2>
@@ -297,7 +320,7 @@
 
         <div class="card-compact" style="background:#fffcf8;">
           <div class="area-title">
-            あなたの12枚 <span class="small-note" id="naming-sort-hint">（※2枚の牌を順番にタップすると位置を入れ替えられます）</span>
+            あなたの12枚 <span class="small-note" id="naming-sort-hint">（※2枚の牌を順番にタップすると入れ替えられます）</span>
           </div>
           <div id="naming-hand-tiles" class="hand-tiles"></div>
         </div>
@@ -349,18 +372,19 @@
       <button id="btn-close-rules" class="modal-close">×</button>
       <h2>🐱 にゃんジャラ ルール</h2>
       <ul>
-        <li><strong>牌の構成</strong>：猫10種×4表情（各3枚＝120枚）＋小物（各5枚）＋特別牌（各3枚＝12枚）。</li>
+        <li><strong>牌の構成</strong>：猫（2〜3人:8種 / 4人:10種 / 5〜6人:12種 ×4表情×各3枚）＋ 抽選された小物8種（各6枚）＋ 特別牌（各3枚）。</li>
         <li><strong>手番</strong>：初期11枚。山札から1枚引き、1枚捨てる（20巡目まで／ポン・チー・ロンなし）。</li>
         <li><strong>上がり形（12枚）</strong>：
           <ul>
             <li><b>1×12 オール別猫＋別小物（200点）</b>：同じ猫種も小物も一切被らない12枚。</li>
-            <li><b>3×4（100点）</b>／<b>2×6（100点）</b>：各組が「同じ牌」「同じ猫種」「同じ表情」のいずれかで成立。</li>
+            <li><b>3×4（100点）</b>／<b>2×6（100点）</b>：各組が「同じ猫種」または「同じ小物」で成立。（※同じ表情だけでは揃いません）</li>
             <li><b>1×12 オール猫（60点）</b>：すべて猫牌（猫種被りあり）。</li>
           </ul>
         </li>
-        <li><strong>特別牌</strong>：コピー牌／交換牌／オールマイティーは手牌に未処理のまま残っていると上がれません。ドラ牌は追加ツモ＋得点倍率（×1.5 / ×2 / ×3）。</li>
+        <li><strong>追加役ボーナス（ドラ有効）</strong>：一盃口(＋30)・二盃口(＋80)・色違い同じ表情(＋30〜100)・完全同顔セット(＋30/組)・猫/小物まみれ(＋50)・4表情コンプ(＋40)・小物6枚独占(＋60)。</li>
+        <li><strong>早上がりボーナス（ドラなし）</strong>：1位＋50 / 2位＋30 / 3位＋10。</li>
+        <li><strong>特別牌</strong>：コピー牌／交換牌／オールマイティーは未処理のまま上がれません。ドラ牌は追加ツモ＋倍率（×1.5 / ×2 / ×3）。</li>
         <li><strong>最終特別ルール</strong>：20巡目に役ができなかった場合、1回だけ川の牌と手牌1枚を入れ替えられます。</li>
-        <li><strong>発表＆投票</strong>：全員秘密で役名と並び順を決め、役名発表 ▶ 投票（1票＋50点、ドラ有効） ▶ 投票結果発表 の順で競います！</li>
       </ul>
     </div>
   </div>
@@ -411,12 +435,14 @@
     function showLobbyError(msg) { $("lobby-error").textContent = msg; }
     function isFirebaseConfigured() { return firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("YOUR_"); }
 
+    // 猫1〜12定義（2-3人:8種 / 4人:10種 / 5-6人:12種）
     const CAT_TYPES = [
       { id: "kuro", name: "黒猫", emoji: "🐈‍⬛" }, { id: "shiro", name: "白猫", emoji: "🐱" },
       { id: "chatora", name: "茶トラ", emoji: "🐯" }, { id: "kijitora", name: "キジトラ", emoji: "🦊" },
       { id: "mike", name: "三毛猫", emoji: "🍡" }, { id: "sabatora", name: "サバトラ", emoji: "🐟" },
       { id: "hachiware", name: "ハチワレ", emoji: "🐼" }, { id: "sabi", name: "サビ猫", emoji: "🍂" },
-      { id: "shamu", name: "シャム猫", emoji: "💎" }, { id: "persian", name: "ペルシャ", emoji: "👑" }
+      { id: "shamu", name: "シャム猫", emoji: "💎" }, { id: "persian", name: "ペルシャ", emoji: "👑" },
+      { id: "munchkin", name: "マンチカン", emoji: "🐾" }, { id: "scottish", name: "スコティッシュ", emoji: "🎀" }
     ];
     const EXPRESSIONS = [
       { id: "normal", name: "普通", emoji: "😐" }, { id: "smile", name: "笑顔", emoji: "😊" },
@@ -448,13 +474,20 @@
       return a;
     }
 
+    function getCatCountForPlayers(playerCount) {
+      return playerCount <= 3 ? 8 : playerCount === 4 ? 10 : 12;
+    }
+
+    // Ver.7山札生成：小物8種×6枚固定(48枚) ＋ 猫(8/10/12種)×4表情×3枚 ＋ 特別4種×3枚(12枚)
     function createDeckForPlayers(playerCount) {
-      const catSets = 3;
-      const itemKindCount = playerCount <= 3 ? 5 : playerCount === 4 ? 8 : 12;
+      const catCount = getCatCountForPlayers(playerCount);
+      const activeCats = CAT_TYPES.slice(0, catCount);
+      const chosenItems = shuffle(ITEM_TYPES).slice(0, 8);
       let seq = 1;
       const deck = [];
-      for (let s = 0; s < catSets; s++) {
-        for (const cat of CAT_TYPES) {
+
+      for (let s = 0; s < 3; s++) {
+        for (const cat of activeCats) {
           for (const expr of EXPRESSIONS) {
             deck.push({
               uid: `t_${seq++}`, kind: "cat", tileId: `cat_${cat.id}_${expr.id}`,
@@ -464,8 +497,8 @@
           }
         }
       }
-      for (const item of shuffle(ITEM_TYPES).slice(0, itemKindCount)) {
-        for (let c = 0; c < 5; c++) {
+      for (const item of chosenItems) {
+        for (let c = 0; c < 6; c++) {
           deck.push({ uid: `t_${seq++}`, kind: "item", tileId: `item_${item.id}`, itemName: item.name, itemEmoji: item.emoji });
         }
       }
@@ -478,7 +511,7 @@
           });
         }
       }
-      return shuffle(deck);
+      return { deck: shuffle(deck), roundItems: chosenItems };
     }
 
     function isUnconvertedSpecial(t) {
@@ -486,52 +519,155 @@
         t.specialId === "copy" || t.specialId === "exchange" || t.specialId === "almighty";
     }
 
+    // 同じ表情だけでは揃わない（同じ猫種 または 同じ小物 のみ）
     function isValidGroup(group) {
       if (group.some(isUnconvertedSpecial)) return false;
       if (group.every(t => t.tileId === group[0].tileId)) return true;
-      if (group.every(t => t.kind === "cat")) {
-        if (group.every(t => t.catType === group[0].catType) || group.every(t => t.expr === group[0].expr)) return true;
-      }
+      if (group.every(t => t.kind === "cat") && group.every(t => t.catType === group[0].catType)) return true;
       return false;
     }
 
-    function canForm3x4(tiles) {
-      const used = new Array(tiles.length).fill(false);
+    // 3×4・2×6 組分けに対する追加ボーナス計算
+    function scoreGroupedHand(tiles, groups, baseLabel) {
+      let score = 100;
+      const bonuses = [];
+
+      // ① 一盃口 / 二盃口（まったく同じ牌構成の組が2つで1ペア）
+      const sigCounts = new Map();
+      for (const g of groups) {
+        const sig = g.map(t => t.tileId).sort().join("|");
+        sigCounts.set(sig, (sigCounts.get(sig) || 0) + 1);
+      }
+      let pairCount = 0;
+      for (const cnt of sigCounts.values()) pairCount += Math.floor(cnt / 2);
+      if (pairCount >= 2) { score += 80; bonuses.push("二盃口+80"); }
+      else if (pairCount === 1) { score += 30; bonuses.push("一盃口+30"); }
+
+      // ② 表情おそろい（猫種が違うけど表情の組み合わせが同じ猫組が2〜4組）
+      const exprMap = new Map();
+      for (const g of groups) {
+        if (g.every(t => t.kind === "cat")) {
+          const eSig = g.map(t => t.expr).sort().join("|");
+          if (!exprMap.has(eSig)) exprMap.set(eSig, new Set());
+          exprMap.get(eSig).add(g[0].catType);
+        }
+      }
+      let maxDiffCatExpr = 0;
+      for (const catSet of exprMap.values()) {
+        if (catSet.size > maxDiffCatExpr) maxDiffCatExpr = catSet.size;
+      }
+      if (maxDiffCatExpr >= 4) { score += 100; bonuses.push("4色表情おそろい+100"); }
+      else if (maxDiffCatExpr === 3) { score += 60; bonuses.push("3色表情おそろい+60"); }
+      else if (maxDiffCatExpr === 2) { score += 30; bonuses.push("2色表情おそろい+30"); }
+
+      // ③ 完全同顔セット（同じ猫種かつ表情も全部同じ猫組）
+      let sameFaceCount = 0;
+      for (const g of groups) {
+        if (g.every(t => t.kind === "cat") && g.every(t => t.tileId === g[0].tileId)) sameFaceCount++;
+      }
+      if (sameFaceCount > 0) {
+        score += sameFaceCount * 30;
+        bonuses.push(`完全同顔×${sameFaceCount}+${sameFaceCount * 30}`);
+      }
+
+      // ④ 猫まみれ / ⑤ 小物まみれ
+      if (tiles.every(t => t.kind === "cat")) { score += 50; bonuses.push("猫まみれ+50"); }
+      if (tiles.every(t => t.kind === "item")) { score += 50; bonuses.push("小物まみれ+50"); }
+
+      // ⑥ 4表情コンプリート（同じ猫種で4表情すべてを含む）
+      const catExprs = new Map();
+      for (const t of tiles) {
+        if (t.kind === "cat") {
+          if (!catExprs.has(t.catType)) catExprs.set(t.catType, new Set());
+          catExprs.get(t.catType).add(t.expr);
+        }
+      }
+      if ([...catExprs.values()].some(s => s.size === 4)) {
+        score += 40; bonuses.push("4表情コンプ+40");
+      }
+
+      // ⑦ 小物6枚独占
+      const itemCounts = new Map();
+      for (const t of tiles) {
+        if (t.kind === "item") itemCounts.set(t.tileId, (itemCounts.get(t.tileId) || 0) + 1);
+      }
+      if ([...itemCounts.values()].some(c => c >= 6)) {
+        score += 60; bonuses.push("小物6枚独占+60");
+      }
+
+      const label = bonuses.length > 0 ? `${baseLabel}（${bonuses.join("・")}）` : baseLabel;
+      return { score, label };
+    }
+
+    function findBest3x4(tiles) {
+      const sorted = [...tiles].sort((a, b) => a.tileId.localeCompare(b.tileId));
+      const used = new Array(sorted.length).fill(false);
+      let best = null;
+      const curGroups = [];
+
       function dfs(rem) {
-        if (rem === 0) return true;
-        const i = used.indexOf(false); used[i] = true;
-        for (let j = i + 1; j < tiles.length; j++) {
-          if (used[j]) continue;
-          for (let k = j + 1; k < tiles.length; k++) {
-            if (used[k]) continue;
-            if (isValidGroup([tiles[i], tiles[j], tiles[k]])) {
+        if (rem === 0) {
+          const res = scoreGroupedHand(sorted, curGroups, "3×4");
+          if (!best || res.score > best.score) best = res;
+          return;
+        }
+        const i = used.indexOf(false);
+        used[i] = true;
+        let prevJ = null;
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (used[j] || sorted[j].tileId === prevJ) continue;
+          prevJ = sorted[j].tileId;
+          let prevK = null;
+          for (let k = j + 1; k < sorted.length; k++) {
+            if (used[k] || sorted[k].tileId === prevK) continue;
+            const grp = [sorted[i], sorted[j], sorted[k]];
+            if (isValidGroup(grp)) {
+              prevK = sorted[k].tileId;
               used[j] = used[k] = true;
-              if (dfs(rem - 3)) return true;
+              curGroups.push(grp);
+              dfs(rem - 3);
+              curGroups.pop();
               used[j] = used[k] = false;
             }
           }
         }
-        used[i] = false; return false;
+        used[i] = false;
       }
-      return dfs(tiles.length);
+      dfs(sorted.length);
+      return best;
     }
 
-    function canForm2x6(tiles) {
-      const used = new Array(tiles.length).fill(false);
+    function findBest2x6(tiles) {
+      const sorted = [...tiles].sort((a, b) => a.tileId.localeCompare(b.tileId));
+      const used = new Array(sorted.length).fill(false);
+      let best = null;
+      const curGroups = [];
+
       function dfs(rem) {
-        if (rem === 0) return true;
-        const i = used.indexOf(false); used[i] = true;
-        for (let j = i + 1; j < tiles.length; j++) {
-          if (used[j]) continue;
-          if (isValidGroup([tiles[i], tiles[j]])) {
+        if (rem === 0) {
+          const res = scoreGroupedHand(sorted, curGroups, "2×6");
+          if (!best || res.score > best.score) best = res;
+          return;
+        }
+        const i = used.indexOf(false);
+        used[i] = true;
+        let prevJ = null;
+        for (let j = i + 1; j < sorted.length; j++) {
+          if (used[j] || sorted[j].tileId === prevJ) continue;
+          const grp = [sorted[i], sorted[j]];
+          if (isValidGroup(grp)) {
+            prevJ = sorted[j].tileId;
             used[j] = true;
-            if (dfs(rem - 2)) return true;
+            curGroups.push(grp);
+            dfs(rem - 2);
+            curGroups.pop();
             used[j] = false;
           }
         }
-        used[i] = false; return false;
+        used[i] = false;
       }
-      return dfs(tiles.length);
+      dfs(sorted.length);
+      return best;
     }
 
     function evaluateHand(tiles) {
@@ -540,16 +676,27 @@
       const cands = [];
       const cats = tiles.filter(t => t.kind === "cat"), items = tiles.filter(t => t.kind === "item");
       const uCat = new Set(cats.map(t => t.catType)), uItem = new Set(items.map(t => t.tileId));
-      if (uCat.size === cats.length && uItem.size === items.length) cands.push({ score: 200, label: "1×12 オール別猫＋別小物" });
-      if (canForm3x4(tiles)) cands.push({ score: 100, label: "3×4 完成" });
-      if (canForm2x6(tiles)) cands.push({ score: 100, label: "2×6 完成" });
-      if (cats.length === 12) cands.push({ score: 60, label: "1×12 オール猫" });
+
+      if (uCat.size === cats.length && uItem.size === items.length) {
+        cands.push({ score: 200, label: "1×12 オール別猫＋別小物" });
+      }
+      const res3x4 = findBest3x4(tiles);
+      if (res3x4) cands.push(res3x4);
+      const res2x6 = findBest2x6(tiles);
+      if (res2x6) cands.push(res2x6);
+      if (cats.length === 12) {
+        cands.push({ score: 60, label: "1×12 オール猫" });
+      }
       if (cands.length === 0) return null;
       cands.sort((a, b) => b.score - a.score);
       return cands[0];
     }
 
     function getDoraMultiplier(n) { return n >= 3 ? 3 : n === 2 ? 2 : n === 1 ? 1.5 : 1; }
+    function getSpeedBonus(winOrder, uid) {
+      const idx = (winOrder || []).indexOf(uid);
+      return idx === 0 ? 50 : idx === 1 ? 30 : idx === 2 ? 10 : 0;
+    }
 
     let app = null, auth = null, db = null;
     function initFirebase(onUserReady) {
@@ -578,8 +725,8 @@
         code, hostUid: uid, phase: "waiting", round: 1,
         players: { [uid]: { uid, name: playerName, totalScore: 0, order: 0 } },
         turnOrder: [uid], turnIndex: 0, turnPhase: "draw",
-        deck: [], discard: [], excluded: [], hands: {}, doras: {},
-        drawCounts: {}, statuses: {}, winResults: {}, finalSwapUsed: {},
+        deck: [], discard: [], excluded: [], roundItems: [], hands: {}, doras: {},
+        drawCounts: {}, statuses: {}, winOrder: [], winResults: {}, finalSwapUsed: {},
         names: {}, votes: {}, roundResults: null
       });
       return code;
@@ -660,8 +807,8 @@
     }
 
     function buildRoundInitialState(turnOrder, roundNum) {
-      const deck = createDeckForPlayers(turnOrder.length);
-      const state = { deck, discard: [], excluded: [], hands: {}, doras: {}, drawCounts: {}, statuses: {}, winResults: {}, finalSwapUsed: {} };
+      const { deck, roundItems } = createDeckForPlayers(turnOrder.length);
+      const state = { deck, roundItems, discard: [], excluded: [], hands: {}, doras: {}, drawCounts: {}, statuses: {}, winOrder: [], winResults: {}, finalSwapUsed: {} };
       for (const uid of turnOrder) {
         state.hands[uid] = []; state.doras[uid] = []; state.drawCounts[uid] = 0;
         state.statuses[uid] = "playing"; state.winResults[uid] = null; state.finalSwapUsed[uid] = false;
@@ -724,6 +871,11 @@
       showScreen("game");
       $("game-round").textContent = room.round;
       $("game-deck-count").textContent = room.deck.length;
+
+      // 右側役一覧に今回登場した小物8種を表示
+      const roundItemsEl = $("sidebar-round-items");
+      roundItemsEl.innerHTML = (room.roundItems || []).map(it => `<span class="item-chip">${it.emoji} ${it.name}</span>`).join("");
+
       const activeUid = room.turnOrder[room.turnIndex];
       const isMyTurn = activeUid === myUid && room.statuses[myUid] === "playing";
       const banner = $("game-turn-banner");
@@ -733,9 +885,10 @@
       const pBar = $("game-players-bar"); pBar.innerHTML = "";
       for (const uid of room.turnOrder) {
         const p = room.players[uid], st = room.statuses[uid], doraCount = (room.doras[uid] || []).length;
+        const winRank = (room.winOrder || []).indexOf(uid);
         const chip = document.createElement("div");
         chip.className = `p-chip${uid === activeUid && st === "playing" ? " active" : ""}${st !== "playing" ? " done" : ""}`;
-        const stLabel = st === "won" ? "🎉 上がり待機" : st === "finished" ? "⏳ 終了待機" : `巡目 ${room.drawCounts[uid]}/20`;
+        const stLabel = st === "won" ? `🎉 ${winRank + 1}位上がり` : st === "finished" ? "⏳ 終了待機" : `巡目 ${room.drawCounts[uid]}/20`;
         chip.innerHTML = `<div><strong>${p.name}</strong>${uid === myUid ? " (自分)" : ""}</div><div>${p.totalScore}点 / ドラ${doraCount}枚</div><div>${stLabel}</div>`;
         pBar.appendChild(chip);
       }
@@ -769,6 +922,24 @@
         handEl.appendChild(el);
       });
       renderActionControls(room, myHand, isMyTurn, myDraws);
+    }
+
+    function openWildModal() {
+      if (!currentRoom) return;
+      const catCount = getCatCountForPlayers(currentRoom.turnOrder.length);
+      const catSel = $("wild-cat-select"), exprSel = $("wild-expr-select"), itemGrid = $("wild-item-grid");
+      catSel.innerHTML = CAT_TYPES.slice(0, catCount).map(c => `<option value="${c.id}">${c.emoji} ${c.name}</option>`).join("");
+      exprSel.innerHTML = EXPRESSIONS.map(e => `<option value="${e.id}">${e.emoji} ${e.name}</option>`).join("");
+      itemGrid.innerHTML = "";
+      const itemsToShow = (currentRoom.roundItems && currentRoom.roundItems.length > 0) ? currentRoom.roundItems : ITEM_TYPES;
+      for (const it of itemsToShow) {
+        const btn = document.createElement("button");
+        btn.className = "btn btn-sub btn-sm";
+        btn.textContent = `${it.emoji} ${it.name}`;
+        btn.onclick = () => applyWildTransform({ kind: "item", tileId: `item_${it.id}`, itemName: it.name, itemEmoji: it.emoji });
+        itemGrid.appendChild(btn);
+      }
+      $("modal-wild").classList.remove("hidden");
     }
 
     function renderActionControls(room, myHand, isMyTurn, myDraws) {
@@ -825,7 +996,7 @@
       if (selectedTile?.specialId === "almighty") {
         const wildBtn = document.createElement("button");
         wildBtn.className = "btn btn-accent"; wildBtn.textContent = "🌈 好きな牌に変身させる";
-        wildBtn.onclick = () => $("modal-wild").classList.remove("hidden");
+        wildBtn.onclick = openWildModal;
         btns.appendChild(wildBtn);
       }
       if (!isFinalTurn) {
@@ -924,10 +1095,16 @@
       }
       selectedUid = null; interactionMode = "normal";
       await runRoomTransaction(currentRoomCode, async (tx, ref, data) => {
+        if (data.statuses[myUid] !== "playing") return;
         const ordered = getOrderedHand(data.hands[myUid]);
         if (ordered.some(isUnconvertedSpecial)) return;
+        const winOrder = [...(data.winOrder || []), myUid];
         const { nextIndex, allDone } = advanceTurn({ ...data, statuses: { ...data.statuses, [myUid]: "won" } });
-        tx.update(ref, { [`hands.${myUid}`]: ordered, [`statuses.${myUid}`]: "won", [`winResults.${myUid}`]: evalResult, turnIndex: nextIndex, turnPhase: "draw", phase: allDone ? "naming" : "playing" });
+        tx.update(ref, {
+          [`hands.${myUid}`]: ordered, [`statuses.${myUid}`]: "won",
+          winOrder, [`winResults.${myUid}`]: evalResult,
+          turnIndex: nextIndex, turnPhase: "draw", phase: allDone ? "naming" : "playing"
+        });
       });
     }
 
@@ -940,7 +1117,6 @@
       });
     }
 
-    // 4. 命名フェーズ描画（自分の手牌のみ表示・他人の結果や牌は一切見せない・並び替え可）
     function renderNamingTiles(room, alreadyNamed) {
       const myHand = getOrderedHand(room.hands[myUid] || []);
       const el = $("naming-hand-tiles");
@@ -967,11 +1143,12 @@
       showScreen("naming");
       const myWin = room.winResults[myUid];
       const myDoraCount = (room.doras[myUid] || []).length;
+      const mySpeed = getSpeedBonus(room.winOrder, myUid);
       const mySubmittedName = room.names[myUid];
       const alreadyNamed = Boolean(mySubmittedName);
 
       $("naming-my-status").textContent =
-        `あなたの状態：${myWin ? `🎉 上がり達成！（${myWin.label}：${myWin.score}点）` : "流局（0点・芸術点勝負！）"} ｜ 所持ドラ：${myDoraCount}枚`;
+        `あなたの状態：${myWin ? `🎉 ${myWin.label}（${myWin.score}点）` : "流局（0点・芸術点勝負！）"}${mySpeed ? ` ＋ 早上がり${mySpeed}点` : ""} ｜ ドラ${myDoraCount}枚`;
 
       $("naming-input-box").classList.toggle("hidden", alreadyNamed);
       $("naming-done-box").classList.toggle("hidden", !alreadyNamed);
@@ -981,7 +1158,6 @@
       const doneCount = room.turnOrder.filter(uid => Boolean(room.names[uid])).length;
       $("naming-progress").textContent = `役名の入力状況：${doneCount} / ${room.turnOrder.length} 人 完了（全員終わると発表へ進みます）`;
 
-      // 他人が送信した時に手牌や入力中の文字がリセットされないようキーで制御
       const renderKey = `${room.round}_${alreadyNamed}`;
       if (lastNamingRenderKey !== renderKey) {
         lastNamingRenderKey = renderKey;
@@ -990,7 +1166,6 @@
       }
     }
 
-    // 5. 役名発表 ▶ 投票フェーズ描画
     function renderRevealOrVotePhase(room) {
       lastNamingRenderKey = "";
       showScreen("vote");
@@ -1016,11 +1191,12 @@
       const alreadyVoted = Boolean(room.votes[myUid]);
       for (const uid of room.turnOrder) {
         const p = room.players[uid], hand = room.hands[uid] || [], win = room.winResults[uid], doraCount = (room.doras[uid] || []).length;
+        const speed = getSpeedBonus(room.winOrder, uid);
         const card = document.createElement("div"); card.className = "vote-card";
         card.innerHTML = `
           <div class="vote-card-head">
             <div><strong>${p.name}</strong> ${uid === myUid ? "(あなた)" : ""}
-              <span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}｜ドラ${doraCount}枚</span>
+              <span class="small-note">｜${win ? `🎉 ${win.label}(${win.score}点)` : "流局(0点)"}${speed ? `＋早+${speed}` : ""}｜ドラ${doraCount}枚</span>
             </div>
             <div class="vote-role-name">「${room.names[uid] || ""}」</div>
           </div>
@@ -1049,18 +1225,20 @@
         for (const v of Object.values(votes)) if (voteCounts[v] !== undefined) voteCounts[v]++;
         const roundResults = [], playerPatches = {};
         for (const uid of data.turnOrder) {
-          const base = data.winResults[uid]?.score || 0, vCount = voteCounts[uid], vScore = vCount * 50;
+          const base = data.winResults[uid]?.score || 0;
+          const vCount = voteCounts[uid], vScore = vCount * 50;
           const mult = getDoraMultiplier((data.doras[uid] || []).length);
-          const roundTotal = Math.ceil((base + vScore) * mult), newTotal = data.players[uid].totalScore + roundTotal;
+          const speed = getSpeedBonus(data.winOrder, uid);
+          const roundTotal = Math.ceil((base + vScore) * mult) + speed;
+          const newTotal = data.players[uid].totalScore + roundTotal;
           playerPatches[`players.${uid}.totalScore`] = newTotal;
-          roundResults.push({ uid, name: data.players[uid].name, roleName: data.names[uid] || "", base, vCount, vScore, mult, roundTotal, newTotal });
+          roundResults.push({ uid, name: data.players[uid].name, roleName: data.names[uid] || "", base, vCount, vScore, mult, speed, roundTotal, newTotal });
         }
         roundResults.sort((a, b) => b.newTotal - a.newTotal);
         tx.update(ref, { [`votes.${myUid}`]: targetUid, ...playerPatches, roundResults, phase: "roundResult" });
       });
     }
 
-    // 6. 投票結果発表 ＆ ラウンド結果画面
     function renderResult(room) {
       lastNamingRenderKey = "";
       showScreen("result");
@@ -1076,10 +1254,7 @@
           <div style="font-weight:bold; margin-bottom:8px;">🗳️ 投票結果（芸術点：1票＝＋50点）</div>
           ${voteSorted.map(r => `
             <div class="vote-result-row">
-              <div>
-                ${maxVote > 0 && r.vCount === maxVote ? "👑 " : ""}
-                <strong>${r.name}</strong>「${r.roleName}」
-              </div>
+              <div>${maxVote > 0 && r.vCount === maxVote ? "👑 " : ""}<strong>${r.name}</strong>「${r.roleName}」</div>
               <div><strong>${r.vCount}票</strong>（＋${r.vScore}点）</div>
             </div>
           `).join("")}
@@ -1090,11 +1265,11 @@
         <tr>
           <td>${i + 1}位</td>
           <td><strong>${r.name}</strong><br><span class="small-note">「${r.roleName}」</span></td>
-          <td>(${r.base} + ${r.vScore}) × ${r.mult} = <strong>${r.roundTotal}点</strong></td>
+          <td>(${r.base} + ${r.vScore}) × ${r.mult}${r.speed ? ` + 早${r.speed}` : ""} = <strong>${r.roundTotal}点</strong></td>
           <td><strong>${r.newTotal}点</strong></td>
         </tr>
       `).join("");
-      $("result-table-wrap").innerHTML = `<table class="result-table"><thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点 (役+投票)×ドラ</th><th>累計</th></tr></thead><tbody>${rows}</tbody></table>`;
+      $("result-table-wrap").innerHTML = `<table class="result-table"><thead><tr><th>順位</th><th>名前 / 役名</th><th>今回得点 (役+投票)×ドラ+早</th><th>累計</th></tr></thead><tbody>${rows}</tbody></table>`;
 
       const area = $("result-next-area"); area.innerHTML = "";
       if (room.hostUid === myUid) {
@@ -1130,29 +1305,16 @@
       });
     }
 
-    function initWildModal() {
-      const catSel = $("wild-cat-select"), exprSel = $("wild-expr-select"), itemGrid = $("wild-item-grid");
-      catSel.innerHTML = CAT_TYPES.map(c => `<option value="${c.id}">${c.emoji} ${c.name}</option>`).join("");
-      exprSel.innerHTML = EXPRESSIONS.map(e => `<option value="${e.id}">${e.emoji} ${e.name}</option>`).join("");
-      itemGrid.innerHTML = "";
-      for (const it of ITEM_TYPES) {
-        const btn = document.createElement("button");
-        btn.className = "btn btn-sub btn-sm";
-        btn.textContent = `${it.emoji} ${it.name}`;
-        btn.onclick = () => applyWildTransform({ kind: "item", tileId: `item_${it.id}`, itemName: it.name, itemEmoji: it.emoji });
-        itemGrid.appendChild(btn);
-      }
-      $("btn-confirm-wild-cat").onclick = () => {
-        const cat = CAT_TYPES.find(c => c.id === catSel.value);
-        const expr = EXPRESSIONS.find(e => e.id === exprSel.value);
-        applyWildTransform({
-          kind: "cat", tileId: `cat_${cat.id}_${expr.id}`,
-          catType: cat.id, catName: cat.name, catEmoji: cat.emoji,
-          expr: expr.id, exprName: expr.name, exprEmoji: expr.emoji
-        });
-      };
-      $("btn-close-wild").onclick = () => $("modal-wild").classList.add("hidden");
-    }
+    $("btn-confirm-wild-cat").onclick = () => {
+      const cat = CAT_TYPES.find(c => c.id === $("wild-cat-select").value);
+      const expr = EXPRESSIONS.find(e => e.id === $("wild-expr-select").value);
+      applyWildTransform({
+        kind: "cat", tileId: `cat_${cat.id}_${expr.id}`,
+        catType: cat.id, catName: cat.name, catEmoji: cat.emoji,
+        expr: expr.id, exprName: expr.name, exprEmoji: expr.emoji
+      });
+    };
+    $("btn-close-wild").onclick = () => $("modal-wild").classList.add("hidden");
 
     const urlParams = new URLSearchParams(window.location.search);
     const inviteCode = urlParams.get("room");
@@ -1162,7 +1324,6 @@
     }
 
     window.__nyanjaraBooted = true;
-    initWildModal();
     $("input-player-name").value = localStorage.getItem(LS_NAME) || "";
     $("config-warning").classList.toggle("hidden", isFirebaseConfigured());
 
@@ -1235,7 +1396,6 @@
       if (currentRoom) await updateRoom(currentRoomCode, buildRoundInitialState(currentRoom.turnOrder, 1));
     };
 
-    // 役名決定時：並び替えた自分の手牌順序も一緒に確定保存する
     $("btn-submit-name").onclick = async () => {
       const roleName = $("input-role-name").value.trim();
       if (!roleName) return alert("役名を入力してください！");
